@@ -236,6 +236,78 @@ class OdooClient {
     return ((rows.first as Map)['id'] as num).toInt();
   }
 
+  /// Internal product categories (for the unified category mapping).
+  Future<List<PosCategory>> getProductCategories() async {
+    final result =
+        await callKw('product.category', 'search_read', [], kwargs: {
+      'domain': [],
+      'fields': ['id', 'name'],
+      'limit': 200,
+      'order': 'name',
+    });
+    return (result as List).map((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      return PosCategory(
+          id: (m['id'] as num).toInt(), name: (m['name'] ?? '').toString());
+    }).toList();
+  }
+
+  /// All variants matching a barcode/default_code (for the duplicate picker).
+  Future<List<InventoryProduct>> findVariants(String code) async {
+    final c = code.trim();
+    if (c.isEmpty) return [];
+    final result = await callKw('product.product', 'search_read', [], kwargs: {
+      'domain': [
+        '|',
+        ['barcode', '=', c],
+        ['default_code', '=', c],
+      ],
+      'fields': [
+        'id',
+        'product_tmpl_id',
+        'name',
+        'barcode',
+        'default_code',
+        'list_price',
+        'standard_price',
+        'pos_categ_ids',
+        'qty_available',
+      ],
+      'limit': 5,
+    });
+    return (result as List)
+        .map((e) => InventoryProduct.fromMap(
+            (e as Map).cast<String, dynamic>()))
+        .toList();
+  }
+
+  /// Variants using [sku] as default_code (for the SKU collision check).
+  Future<List<InventoryProduct>> findBySku(String sku) async {
+    final s = sku.trim();
+    if (s.isEmpty) return [];
+    final result = await callKw('product.product', 'search_read', [], kwargs: {
+      'domain': [
+        ['default_code', '=', s]
+      ],
+      'fields': [
+        'id',
+        'product_tmpl_id',
+        'name',
+        'barcode',
+        'default_code',
+        'list_price',
+        'standard_price',
+        'pos_categ_ids',
+        'qty_available',
+      ],
+      'limit': 2,
+    });
+    return (result as List)
+        .map((e) => InventoryProduct.fromMap(
+            (e as Map).cast<String, dynamic>()))
+        .toList();
+  }
+
   Future<int> _stockLocationId() async {
     final result =
         await callKw('stock.location', 'search_read', [], kwargs: {
@@ -274,27 +346,42 @@ class OdooClient {
     ]);
   }
 
-  /// Bump on-hand by [addQty]: inventory_quantity = current + addQty.
-  Future<double> addStock(InventoryProduct p, double addQty) async {
-    if (addQty == 0) return p.qtyAvailable;
+  /// Update template name only when changed.
+  Future<void> updateName(InventoryProduct p, String name) async {
+    final n = name.trim();
+    if (n.isEmpty || n == p.name) return;
+    await callKw('product.template', 'write', [
+      [p.tmplId],
+      {'name': n},
+    ]);
+  }
+
+  /// Update variant SKU (default_code) only when changed.
+  Future<void> updateSku(InventoryProduct p, String sku) async {
+    final s = sku.trim();
+    if (s == p.defaultCode) return;
+    await callKw('product.product', 'write', [
+      [p.variantId],
+      {'default_code': s.isEmpty ? false : s},
+    ]);
+  }
+
+  Future<double> _writeQuant(InventoryProduct p, double target) async {
     final found = await callKw('stock.quant', 'search_read', [], kwargs: {
       'domain': [
         ['product_id', '=', p.variantId],
         ['location_id.usage', '=', 'internal'],
       ],
-      'fields': ['id', 'inventory_quantity', 'quantity'],
+      'fields': ['id', 'quantity'],
       'limit': 1,
     });
     final rows = (found as List);
     if (rows.isNotEmpty) {
       final q = (rows.first as Map).cast<String, dynamic>();
-      final current = q['quantity'] is num
-          ? (q['quantity'] as num).toDouble()
-          : p.qtyAvailable;
       final id = (q['id'] as num).toInt();
       await callKw('stock.quant', 'write', [
         [id],
-        {'inventory_quantity': current + addQty},
+        {'inventory_quantity': target},
       ]);
       try {
         await callKw('stock.quant', 'action_apply_inventory', [
@@ -303,14 +390,14 @@ class OdooClient {
       } catch (_) {
         // 18 auto-applies on write in most configs; ignore.
       }
-      return current + addQty;
+      return target;
     }
     final locId = await _stockLocationId();
     final created = await callKw('stock.quant', 'create', [
       {
         'product_id': p.variantId,
         'location_id': locId,
-        'inventory_quantity': p.qtyAvailable + addQty,
+        'inventory_quantity': target,
       }
     ]);
     try {
@@ -318,10 +405,35 @@ class OdooClient {
         [created]
       ]);
     } catch (_) {}
-    return p.qtyAvailable + addQty;
+    return target;
   }
 
-  /// Create template + set variant barcode + set initial stock.
+  /// Bump on-hand by [addQty]: inventory_quantity = current + addQty.
+  Future<double> addStock(InventoryProduct p, double addQty) async {
+    if (addQty == 0) return p.qtyAvailable;
+    final found = await callKw('stock.quant', 'search_read', [], kwargs: {
+      'domain': [
+        ['product_id', '=', p.variantId],
+        ['location_id.usage', '=', 'internal'],
+      ],
+      'fields': ['id', 'quantity'],
+      'limit': 1,
+    });
+    final rows = (found as List);
+    double current = p.qtyAvailable;
+    if (rows.isNotEmpty) {
+      final q = (rows.first as Map).cast<String, dynamic>();
+      if (q['quantity'] is num) current = (q['quantity'] as num).toDouble();
+    }
+    return _writeQuant(p, current + addQty);
+  }
+
+  /// Set on-hand to [counted] (Count = mode): inventory_quantity = counted.
+  Future<double> setStock(InventoryProduct p, double counted) {
+    return _writeQuant(p, counted);
+  }
+
+  /// Create template + set variant barcode/SKU + set initial stock.
   /// Returns the variant id.
   Future<int> createProduct({
     required String name,
@@ -330,20 +442,24 @@ class OdooClient {
     required double listPrice,
     required double standardPrice,
     required double qty,
+    int? categId,
+    String sku = '',
+    bool saleOk = true,
+    bool purchaseOk = true,
   }) async {
-    final categId = await _defaultCategId();
+    final internalCateg = categId ?? await _defaultCategId();
     final tmplId = await callKw('product.template', 'create', [
       {
         'name': name,
         'list_price': listPrice,
         'standard_price': standardPrice,
-        'categ_id': categId,
+        'categ_id': internalCateg,
         'pos_categ_ids': [
           [6, 0, [posCategId]]
         ],
-        'sale_ok': true,
-        'purchase_ok': true,
-        'available_in_pos': true,
+        'sale_ok': saleOk,
+        'purchase_ok': purchaseOk,
+        'available_in_pos': saleOk,
         'type': 'consu',
       }
     ]) as int;
@@ -357,10 +473,13 @@ class OdooClient {
     }) as List;
     if (variants.isNotEmpty) {
       final vid = (((variants.first) as Map)['id'] as num).toInt();
-      if (barcode.trim().isNotEmpty) {
+      final variantVals = <String, dynamic>{};
+      if (barcode.trim().isNotEmpty) variantVals['barcode'] = barcode.trim();
+      if (sku.trim().isNotEmpty) variantVals['default_code'] = sku.trim();
+      if (variantVals.isNotEmpty) {
         await callKw('product.product', 'write', [
           [vid],
-          {'barcode': barcode.trim()},
+          variantVals,
         ]);
       }
       if (qty != 0) {

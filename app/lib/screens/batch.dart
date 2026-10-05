@@ -65,7 +65,10 @@ class _BatchScreenState extends State<BatchScreen> {
                     itemBuilder: (_, i) {
                       final l = lines[i];
                       return Dismissible(
-                        key: ValueKey(l.barcode),
+                        key: ValueKey(BatchStore.keyOf(
+                            barcode: l.barcode,
+                            defaultCode: l.defaultCode,
+                            name: l.name)),
                         direction: DismissDirection.endToStart,
                         background: Container(
                             color: Colors.red,

@@ -31,6 +31,18 @@ class BatchStore extends ChangeNotifier {
   List<LabelLine> get lines => List.unmodifiable(_lines);
   int get totalCopies => _lines.fold(0, (a, l) => a + l.copies);
 
+  /// Line key: barcode || defaultCode || name (so barcode-less items
+  /// never merge into one line).
+  static String keyOf({
+    required String barcode,
+    required String defaultCode,
+    required String name,
+  }) {
+    if (barcode.trim().isNotEmpty) return 'b:${barcode.trim()}';
+    if (defaultCode.trim().isNotEmpty) return 's:${defaultCode.trim()}';
+    return 'n:${name.trim().toLowerCase()}';
+  }
+
   void add({
     required String barcode,
     required String name,
@@ -38,8 +50,13 @@ class BatchStore extends ChangeNotifier {
     String defaultCode = '',
     String category = '',
   }) {
+    final key = keyOf(barcode: barcode, defaultCode: defaultCode, name: name);
     for (final l in _lines) {
-      if (l.barcode == barcode) {
+      if (keyOf(
+              barcode: l.barcode,
+              defaultCode: l.defaultCode,
+              name: l.name) ==
+          key) {
         l.copies++;
         notifyListeners();
         return;

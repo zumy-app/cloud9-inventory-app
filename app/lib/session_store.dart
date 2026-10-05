@@ -46,4 +46,28 @@ class SessionStore {
     final p = await SharedPreferences.getInstance();
     await p.setInt(_kLastPosCat, id);
   }
+
+  static const _kInvMode = 'inv_mode'; // 'receive' | 'count'
+
+  static Future<String> loadInvMode() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kInvMode) ?? 'receive';
+  }
+
+  static Future<void> saveInvMode(String mode) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kInvMode, mode);
+  }
+
+  static const _kContinuous = 'continuous_scan';
+
+  static Future<bool> loadContinuous() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_kContinuous) ?? false;
+  }
+
+  static Future<void> saveContinuous(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kContinuous, v);
+  }
 }

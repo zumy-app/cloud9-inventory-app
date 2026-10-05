@@ -91,7 +91,7 @@ class _Cloud9AppState extends State<Cloud9App> {
                   body: IndexedStack(
                     index: _tab,
                     children: [
-                      ReceiveScreen(client: _client),
+                      ReceiveScreen(client: _client, user: _user),
                       const BatchScreen(),
                       _AccountTab(
                           user: _user,

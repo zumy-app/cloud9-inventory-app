@@ -1,17 +1,23 @@
-// Receive screen: scan -> lookup -> save (found) or create (not found).
+// Receive / Count screen: scan -> lookup -> save (found) or create (not found).
+// Two modes: Receive + (additive) vs Count = (absolute). See docs/01-MVP.md.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../audit_log.dart';
 import '../batch_store.dart';
+import '../category_map.dart';
 import '../odoo_client.dart';
+import '../price_guard.dart';
 import '../session_store.dart';
 import 'scan.dart';
+import 'scan_sheet.dart';
 
 class ReceiveScreen extends StatefulWidget {
   final OdooClient client;
-  const ReceiveScreen({super.key, required this.client});
+  final String user;
+  const ReceiveScreen({super.key, required this.client, this.user = ''});
 
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
@@ -22,50 +28,102 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   bool _busy = false;
   String? _err;
 
-  InventoryProduct? _found;
-  bool _duplicate = false;
+  String _mode = 'receive'; // 'receive' | 'count'
+  bool get _isCount => _mode == 'count';
 
+  InventoryProduct? _found;
+  List<InventoryProduct> _duplicates = [];
+
+  final _name = TextEditingController();
+  final _sku = TextEditingController();
   final _cost = TextEditingController();
   final _price = TextEditingController();
   final _qty = TextEditingController(text: '1');
+  final _reason = TextEditingController();
+  bool _reasonRequired = false;
+  bool _skuOverride = false;
+  bool _showPriceAdjust = false;
   bool _addLabel = true;
 
   // new-product form
   final _newName = TextEditingController();
+  final _newSku = TextEditingController();
   final _newCost = TextEditingController();
   final _newPrice = TextEditingController();
   final _newQty = TextEditingController(text: '1');
+  bool _newSaleOk = true;
+  bool _newPurchaseOk = true;
   List<PosCategory> _cats = [];
+  List<PosCategory> _internalCats = [];
   int? _catId;
   bool _catsLoading = false;
+
+  CategoryPair? get _pair {
+    if (_catId == null) return null;
+    final pos = _cats.where((c) => c.id == _catId);
+    if (pos.isEmpty) return null;
+    return CategoryMap.resolve(pos: pos.first, internalCats: _internalCats);
+  }
 
   @override
   void initState() {
     super.initState();
+    _loadPrefs();
     _loadCats();
+  }
+
+  Future<void> _loadPrefs() async {
+    final m = await SessionStore.loadInvMode();
+    if (!mounted) return;
+    setState(() {
+      _mode = m == 'count' ? 'count' : 'receive';
+      if (_isCount && _qty.text == '1') _qty.text = '';
+    });
   }
 
   @override
   void dispose() {
     _barcode.dispose();
+    _name.dispose();
+    _sku.dispose();
     _cost.dispose();
     _price.dispose();
     _qty.dispose();
+    _reason.dispose();
     _newName.dispose();
+    _newSku.dispose();
     _newCost.dispose();
     _newPrice.dispose();
     _newQty.dispose();
     super.dispose();
   }
 
+  Future<void> _setMode(String m) async {
+    await SessionStore.saveInvMode(m);
+    if (!mounted) return;
+    setState(() {
+      _mode = m;
+      _err = null;
+      _reasonRequired = false;
+      _skuOverride = false;
+      _showPriceAdjust = false;
+      _qty.text = _isCount ? '' : '1';
+    });
+  }
+
   Future<void> _loadCats() async {
     setState(() => _catsLoading = true);
     try {
       final cats = await widget.client.getPosCategories();
+      List<PosCategory> internal = [];
+      try {
+        internal = await widget.client.getProductCategories();
+      } catch (_) {}
       final last = await SessionStore.loadLastPosCat();
       if (!mounted) return;
       setState(() {
         _cats = cats;
+        _internalCats = internal;
         if (last != null && cats.any((c) => c.id == last)) {
           _catId = last;
         } else if (cats.isNotEmpty) {
@@ -90,6 +148,20 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
+  Future<void> _openContinuous() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ScanSheet(
+          client: widget.client,
+          user: widget.user,
+          mode: _mode,
+          posCats: _cats,
+          internalCats: _internalCats,
+        ),
+      ),
+    );
+  }
+
   Future<void> _lookup() async {
     final code = _barcode.text.trim();
     if (code.isEmpty || _busy) return;
@@ -97,25 +169,25 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _busy = true;
       _err = null;
       _found = null;
+      _duplicates = [];
+      _reasonRequired = false;
+      _skuOverride = false;
     });
     try {
-      final res = await widget.client.lookupProduct(code);
+      final rows = await widget.client.findVariants(code);
       if (!mounted) return;
-      if (res == null) {
+      if (rows.isEmpty) {
         setState(() {
           _newName.text = '';
+          _newSku.text = code.length <= 32 ? code : '';
           _newCost.text = '';
           _newPrice.text = '';
           _newQty.text = '1';
         });
+      } else if (rows.length > 1) {
+        setState(() => _duplicates = rows);
       } else {
-        _cost.text = res.product.standardPrice.toStringAsFixed(2);
-        _price.text = res.product.listPrice.toStringAsFixed(2);
-        _qty.text = '1';
-        setState(() {
-          _found = res.product;
-          _duplicate = res.duplicate;
-        });
+        _fillFound(rows.first);
       }
     } on OdooException catch (e) {
       if (!mounted) return;
@@ -131,42 +203,260 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
+  void _fillFound(InventoryProduct p) {
+    _name.text = p.name;
+    _sku.text = p.defaultCode;
+    _cost.text = p.standardPrice.toStringAsFixed(2);
+    _price.text = p.listPrice.toStringAsFixed(2);
+    _qty.text = _isCount ? '' : '1';
+    _reason.clear();
+    setState(() {
+      _found = p;
+      _duplicates = [];
+      _showPriceAdjust = false;
+    });
+  }
+
   double _num(String s) => double.tryParse(s.trim()) ?? double.nan;
 
-  Future<void> _saveFound() async {
-    final p = _found;
-    if (p == null || _busy) return;
+  void _audit(String mode, InventoryProduct p, String field, String oldV,
+      String newV, String reason) {
+    AuditLog.instance.add(AuditEntry(
+      when: DateTime.now(),
+      who: widget.user,
+      mode: mode,
+      productId: p.variantId,
+      productName: p.name,
+      field: field,
+      oldValue: oldV,
+      newValue: newV,
+      reason: reason,
+    ));
+  }
+
+  String _catLabel() {
+    if (_catId == null) return '';
+    final pos = _cats.where((c) => c.id == _catId);
+    return pos.isEmpty ? '' : pos.first.name;
+  }
+
+  /// Shared validation + price-guard for the found card.
+  /// Returns null when blocked (sets _err).
+  ({double cost, double price, String reason})? _checkPrices(
+      InventoryProduct p) {
     final cost = _num(_cost.text);
     final price = _num(_price.text);
-    final qty = _num(_qty.text);
-    if (cost.isNaN || price.isNaN || qty.isNaN || qty <= 0) {
-      setState(() => _err = 'Enter valid cost, price and qty > 0.');
+    if (cost.isNaN || price.isNaN || cost < 0 || price < 0) {
+      setState(() => _err = 'Enter valid cost and price (≥ 0).');
+      return null;
+    }
+    final need = PriceGuard.needsReason(
+        newPrice: price, cost: cost, oldPrice: p.listPrice);
+    final reason = _reason.text.trim();
+    if (need && reason.isEmpty) {
+      setState(() {
+        _reasonRequired = true;
+        _err = PriceGuard.describe(
+            newPrice: price, cost: cost, oldPrice: p.listPrice);
+      });
+      return null;
+    }
+    return (cost: cost, price: price, reason: reason);
+  }
+
+  Future<bool> _checkSku(InventoryProduct p) async {
+    final s = _sku.text.trim();
+    if (s == p.defaultCode) return true;
+    if (s.isEmpty) return true;
+    final hits = await widget.client.findBySku(s);
+    final clash =
+        hits.where((h) => h.variantId != p.variantId).toList(growable: false);
+    if (clash.isNotEmpty && !_skuOverride) {
+      if (!mounted) return false;
+      setState(() =>
+          _err = 'SKU in use by ${clash.first.name} — change it or tap Use anyway.');
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _applyNameSkuPrices(
+      InventoryProduct p, double cost, double price, String reason) async {
+    final oldName = p.name;
+    final oldSku = p.defaultCode;
+    final oldCost = p.standardPrice;
+    final oldPrice = p.listPrice;
+    await widget.client.updateName(p, _name.text);
+    await widget.client.updateSku(p, _sku.text);
+    await widget.client.updatePrices(p, price, cost);
+    if (_name.text.trim().isNotEmpty && _name.text.trim() != oldName) {
+      _audit('receive', p, 'name', oldName, _name.text.trim(), reason);
+    }
+    if (_sku.text.trim() != oldSku) {
+      _audit('receive', p, 'sku', oldSku, _sku.text.trim(), reason);
+    }
+    if ((price - oldPrice).abs() > 0.0001) {
+      _audit('receive', p, 'list_price', oldPrice.toStringAsFixed(2),
+          price.toStringAsFixed(2), reason);
+    }
+    if ((cost - oldCost).abs() > 0.0001) {
+      _audit('receive', p, 'standard_price', oldCost.toStringAsFixed(2),
+          cost.toStringAsFixed(2), reason);
+    }
+  }
+
+  void _afterSave(String toast) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(toast)));
+    setState(() {
+      _barcode.clear();
+      _found = null;
+      _reasonRequired = false;
+      _skuOverride = false;
+    });
+  }
+
+  /// Receive + : Add stock button.
+  Future<void> _addStock() async {
+    final p = _found;
+    if (p == null || _busy) return;
+    if (_name.text.trim().length < 2 && _name.text.trim() != p.name) {
+      setState(() => _err = 'Name must be at least 2 characters.');
       return;
     }
+    final qty = _num(_qty.text);
+    if (qty.isNaN || qty < 1) {
+      setState(() => _err = 'Enter qty to add (≥ 1).');
+      return;
+    }
+    final checked = _checkPrices(p);
+    if (checked == null) return;
     setState(() {
       _busy = true;
       _err = null;
     });
     try {
-      await widget.client.updatePrices(p, price, cost);
-      await widget.client.addStock(p, qty);
+      if (!await _checkSku(p)) {
+        if (mounted) setState(() => _busy = false);
+        return;
+      }
+      await _applyNameSkuPrices(p, checked.cost, checked.price, checked.reason);
+      final after = await widget.client.addStock(p, qty);
+      _audit('receive', p, 'qty', p.qtyAvailable.toStringAsFixed(0),
+          after.toStringAsFixed(0), '');
       if (_addLabel) {
         BatchStore.instance.add(
-            barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
-            name: p.name,
-            price: price);
+          barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
+          name: _name.text.trim().isNotEmpty ? _name.text.trim() : p.name,
+          price: checked.price,
+          defaultCode: _sku.text.trim(),
+          category: _catLabel(),
+        );
       }
       if (_catId != null) {
-        // Remember last used category even on save (cheap, keeps default fresh).
         await SessionStore.saveLastPosCat(_catId!);
       }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved ${p.name} × $qty')));
-      setState(() {
-        _barcode.clear();
-        _found = null;
-      });
+      _afterSave('Saved ${p.name} +$qty → $after');
+    } on OdooException catch (e) {
+      if (mounted) setState(() => _err = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _err = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Receive + : Save prices only (no stock change).
+  Future<void> _savePricesOnly() async {
+    final p = _found;
+    if (p == null || _busy) return;
+    final checked = _checkPrices(p);
+    if (checked == null) return;
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    try {
+      if (!await _checkSku(p)) {
+        if (mounted) setState(() => _busy = false);
+        return;
+      }
+      await _applyNameSkuPrices(p, checked.cost, checked.price, checked.reason);
+      _afterSave('Prices saved for ${p.name} (no stock change)');
+    } on OdooException catch (e) {
+      if (mounted) setState(() => _err = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _err = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Count = : Set count button with mandatory before → after confirm.
+  Future<void> _setCount() async {
+    final p = _found;
+    if (p == null || _busy) return;
+    if (_qty.text.trim().isEmpty) {
+      setState(() => _err = 'Enter the counted qty (no default in Count mode).');
+      return;
+    }
+    final counted = _num(_qty.text);
+    if (counted.isNaN || counted < 0) {
+      setState(() => _err = 'Enter counted qty (≥ 0).');
+      return;
+    }
+    double cost = p.standardPrice;
+    double price = p.listPrice;
+    String reason = '';
+    if (_showPriceAdjust) {
+      final checked = _checkPrices(p);
+      if (checked == null) return;
+      cost = checked.cost;
+      price = checked.price;
+      reason = checked.reason;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirm count'),
+        content: Text(
+            '${p.name}\n${p.qtyAvailable.toStringAsFixed(0)} → ${counted.toStringAsFixed(0)}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Confirm')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    try {
+      if (_showPriceAdjust) {
+        if (!await _checkSku(p)) {
+          if (mounted) setState(() => _busy = false);
+          return;
+        }
+        await _applyNameSkuPrices(p, cost, price, reason);
+      }
+      final after = await widget.client.setStock(p, counted);
+      _audit('count', p, 'qty', p.qtyAvailable.toStringAsFixed(0),
+          after.toStringAsFixed(0), '');
+      if (_addLabel) {
+        BatchStore.instance.add(
+          barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
+          name: p.name,
+          price: price,
+          defaultCode: p.defaultCode,
+          category: _catLabel(),
+        );
+      }
+      _afterSave('Counted ${p.name}: → $after');
     } on OdooException catch (e) {
       if (mounted) setState(() => _err = e.message);
     } catch (e) {
@@ -179,39 +469,77 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   Future<void> _createNew() async {
     final code = _barcode.text.trim();
     final name = _newName.text.trim();
+    final sku = _newSku.text.trim();
     final cost = _num(_newCost.text);
     final price = _num(_newPrice.text);
     final qty = _num(_newQty.text);
-    if (name.isEmpty) {
-      setState(() => _err = 'Name is required.');
+    if (name.length < 2) {
+      setState(() => _err = 'Name is required (≥ 2 chars).');
       return;
     }
     if (_catId == null) {
-      setState(() => _err = 'Pick a POS category.');
+      setState(() => _err = 'Pick a category.');
       return;
     }
-    if (cost.isNaN || price.isNaN || qty.isNaN || qty < 0) {
-      setState(() => _err = 'Enter valid cost, price and qty.');
+    final pair = _pair;
+    if (pair == null) {
+      setState(() => _err = 'Unmapped — pick again.');
       return;
+    }
+    if (cost.isNaN || price.isNaN || qty.isNaN || cost < 0 || price < 0 || qty < 0) {
+      setState(() => _err = 'Enter valid cost, price and qty (≥ 0).');
+      return;
+    }
+    String reason = '';
+    if (PriceGuard.needsReason(newPrice: price, cost: cost, oldPrice: 0)) {
+      if (price < cost) {
+        final r = await _askReason(
+            PriceGuard.describe(newPrice: price, cost: cost, oldPrice: 0));
+        if (r == null) return;
+        reason = r;
+      }
+    }
+    if (sku.isNotEmpty) {
+      final hits = await widget.client.findBySku(sku);
+      if (hits.isNotEmpty && mounted) {
+        setState(() => _err = 'SKU in use by ${hits.first.name}.');
+        return;
+      }
     }
     setState(() {
       _busy = true;
       _err = null;
     });
     try {
-      await widget.client.createProduct(
+      final vid = await widget.client.createProduct(
         name: name,
         barcode: code,
-        posCategId: _catId!,
+        posCategId: pair.posId,
+        categId: pair.internalId,
         listPrice: price,
         standardPrice: cost,
         qty: qty,
+        sku: sku,
+        saleOk: _newSaleOk,
+        purchaseOk: _newPurchaseOk,
       );
-      await SessionStore.saveLastPosCat(_catId!);
-      BatchStore.instance.add(barcode: code, name: name, price: price);
+      await SessionStore.saveLastPosCat(pair.posId);
+      BatchStore.instance.add(
+          barcode: code, name: name, price: price, defaultCode: sku);
+      AuditLog.instance.add(AuditEntry(
+        when: DateTime.now(),
+        who: widget.user,
+        mode: 'create',
+        productId: vid,
+        productName: name,
+        field: 'create',
+        oldValue: '—',
+        newValue: 'qty ${qty.toStringAsFixed(0)}, $name',
+        reason: reason,
+      ));
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Created $name')));
+          .showSnackBar(SnackBar(content: Text('Created $name (0 → $qty)')));
       setState(() {
         _barcode.clear();
         _newName.clear();
@@ -225,12 +553,70 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
+  Future<String?> _askReason(String why) async {
+    final c = TextEditingController();
+    final r = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Reason required'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(why),
+            const SizedBox(height: 8),
+            TextField(
+                controller: c,
+                decoration: const InputDecoration(
+                    labelText: 'Reason', border: OutlineInputBorder())),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(c.text.trim()),
+              child: const Text('Continue')),
+        ],
+      ),
+    );
+    if (r == null || r.isEmpty) {
+      if (mounted) setState(() => _err = why);
+      return null;
+    }
+    return r;
+  }
+
   @override
   Widget build(BuildContext context) {
     final code = _barcode.text.trim();
-    final showCreate = code.isNotEmpty && _found == null && !_busy;
+    final showCreate = code.isNotEmpty && _found == null && _duplicates.isEmpty && !_busy;
     return Scaffold(
-      appBar: AppBar(title: const Text('Receive')),
+      appBar: AppBar(
+        title: const Text('Receive'),
+        actions: [
+          IconButton(
+            tooltip: 'Continuous scan',
+            icon: const Icon(Icons.burst_mode),
+            onPressed: _busy ? null : _openContinuous,
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(52),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'receive', label: Text('Receive +')),
+                ButtonSegment(value: 'count', label: Text('Count =')),
+              ],
+              selected: {_mode},
+              onSelectionChanged: (s) => _setMode(s.first),
+            ),
+          ),
+        ),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -277,9 +663,36 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             Text(_err!, style: const TextStyle(color: Colors.red)),
           ],
           const SizedBox(height: 12),
+          if (_duplicates.length > 1) _duplicateCard(),
           if (_found != null) _foundCard(_found!),
           if (showCreate && _found == null) _createCard(code),
         ],
+      ),
+    );
+  }
+
+  Widget _duplicateCard() {
+    return Card(
+      color: Colors.orange.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Duplicate barcode — pick the right item',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+                'Saving is blocked until you choose. Stock must land on the right variant.'),
+            const SizedBox(height: 8),
+            ..._duplicates.map((d) => ListTile(
+                  title: Text(d.name),
+                  subtitle: Text(
+                      'SKU: ${d.defaultCode.isEmpty ? '—' : d.defaultCode} • On-hand: ${d.qtyAvailable.toStringAsFixed(0)}'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _fillFound(d),
+                )),
+          ],
+        ),
       ),
     );
   }
@@ -297,51 +710,110 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             const SizedBox(height: 4),
             Text(
                 'Barcode: ${p.barcode.isNotEmpty ? p.barcode : '—'}  •  On-hand: ${p.qtyAvailable.toStringAsFixed(0)}'),
-            if (_duplicate)
-              const Padding(
-                padding: EdgeInsets.only(top: 4),
-                child: Text('Warning: duplicate barcode — showing first match.',
-                    style: TextStyle(color: Colors.orange)),
-              ),
             const SizedBox(height: 12),
             TextField(
-              controller: _cost,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              controller: _name,
               decoration: const InputDecoration(
-                  labelText: 'Purchase price (cost)',
-                  border: OutlineInputBorder()),
+                  labelText: 'Name', border: OutlineInputBorder()),
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: _price,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
+              controller: _sku,
               decoration: const InputDecoration(
-                  labelText: 'Sale price', border: OutlineInputBorder()),
+                  labelText: 'SKU', border: OutlineInputBorder()),
             ),
             const SizedBox(height: 8),
+            if (!_isCount || _showPriceAdjust) ...[
+              TextField(
+                controller: _cost,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                    labelText: 'Purchase price (cost)',
+                    border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _price,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                    labelText: 'Sale price', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (_isCount && !_showPriceAdjust)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => setState(() => _showPriceAdjust = true),
+                  child: const Text('Adjust price'),
+                ),
+              ),
             TextField(
               controller: _qty,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                  labelText: 'Qty received', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: _isCount ? 'Counted qty' : 'Qty to add',
+                  border: const OutlineInputBorder()),
             ),
+            if (_reasonRequired) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: _reason,
+                decoration: const InputDecoration(
+                    labelText: 'Reason (required)',
+                    border: OutlineInputBorder()),
+              ),
+            ],
+            if (_err != null &&
+                _err!.startsWith('SKU in use')) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => setState(() {
+                    _skuOverride = true;
+                    _err = null;
+                  }),
+                  child: const Text('Use anyway'),
+                ),
+              ),
+            ],
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Add to label batch'),
               value: _addLabel,
               onChanged: (v) => setState(() => _addLabel = v),
             ),
-            SizedBox(
-              height: 52,
-              child: FilledButton(
-                onPressed: _busy ? null : _saveFound,
-                child: const Text('Save & next',
-                    style: TextStyle(fontSize: 18)),
+            if (!_isCount)
+              SizedBox(
+                height: 52,
+                child: FilledButton(
+                  onPressed: _busy ? null : _addStock,
+                  child: const Text('Add stock',
+                      style: TextStyle(fontSize: 18)),
+                ),
               ),
-            ),
+            if (!_isCount) const SizedBox(height: 8),
+            if (!_isCount)
+              SizedBox(
+                height: 52,
+                child: OutlinedButton(
+                  onPressed: _busy ? null : _savePricesOnly,
+                  child: const Text('Save prices only',
+                      style: TextStyle(fontSize: 16)),
+                ),
+              ),
+            if (_isCount)
+              SizedBox(
+                height: 52,
+                child: FilledButton(
+                  onPressed: _busy ? null : _setCount,
+                  child: const Text('Set count',
+                      style: TextStyle(fontSize: 18)),
+                ),
+              ),
           ],
         ),
       ),
@@ -349,6 +821,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   Widget _createCard(String code) {
+    final pair = _pair;
     return Card(
       color: Colors.amber.shade50,
       child: Padding(
@@ -366,19 +839,53 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   labelText: 'Name *', border: OutlineInputBorder()),
             ),
             const SizedBox(height: 8),
+            TextField(
+              controller: _newSku,
+              decoration: const InputDecoration(
+                  labelText: 'SKU', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 8),
             _catsLoading
                 ? const LinearProgressIndicator()
-                : DropdownButtonFormField<int>(
-                    initialValue: _catId,
-                    decoration: const InputDecoration(
-                        labelText: 'POS category *',
-                        border: OutlineInputBorder()),
-                    items: _cats
-                        .map((c) => DropdownMenuItem(
-                            value: c.id, child: Text(c.name)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _catId = v),
+                : Autocomplete<PosCategory>(
+                    displayStringForOption: (c) => c.name,
+                    optionsBuilder: (t) =>
+                        CategoryMap.filter(_cats, t.text),
+                    onSelected: (c) => setState(() => _catId = c.id),
+                    fieldViewBuilder:
+                        (ctx, ctl, focus, onSubmit) {
+                      if (ctl.text.isEmpty && _catId != null) {
+                        ctl.text = _catLabel();
+                      }
+                      return TextField(
+                        controller: ctl,
+                        focusNode: focus,
+                        decoration: const InputDecoration(
+                            labelText: 'Category * (type to filter)',
+                            border: OutlineInputBorder()),
+                        onChanged: (_) {
+                          final m = _cats.where((c) =>
+                              c.name.toLowerCase() ==
+                              ctl.text.trim().toLowerCase());
+                          setState(() =>
+                              _catId = m.isEmpty ? null : m.first.id);
+                        },
+                      );
+                    },
                   ),
+            if (_catId != null && pair == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text('Unmapped — pick again.',
+                    style: TextStyle(color: Colors.red)),
+              ),
+            if (pair != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                    'Maps to: ${pair.internalName} + POS ${pair.posName}',
+                    style: const TextStyle(color: Colors.grey)),
+              ),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -413,13 +920,35 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 ),
               ],
             ),
+            ExpansionTile(
+              title: const Text('Details'),
+              tilePadding: EdgeInsets.zero,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Sellable in POS'),
+                  value: _newSaleOk,
+                  onChanged: (v) => setState(() => _newSaleOk = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Purchasable'),
+                  value: _newPurchaseOk,
+                  onChanged: (v) => setState(() => _newPurchaseOk = v),
+                ),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Chip(label: Text('Type: consumable')),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             SizedBox(
               height: 52,
               child: FilledButton(
                 onPressed: _busy ? null : _createNew,
                 child:
-                    const Text('Create', style: TextStyle(fontSize: 18)),
+                    const Text('Create & next', style: TextStyle(fontSize: 18)),
               ),
             ),
           ],
