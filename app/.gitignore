@@ -50,3 +50,8 @@ app.*.map.json
 **/generated_plugins.cmake
 **/GeneratedPluginRegistrant.swift
 **/GeneratedPluginRegistrant.m
+
+# Release signing secrets — NEVER commit. Back up separately.
+key.properties
+*.keystore
+*.jks
