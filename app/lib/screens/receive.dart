@@ -17,7 +17,14 @@ import 'scan_sheet.dart';
 class ReceiveScreen extends StatefulWidget {
   final OdooClient client;
   final String user;
-  const ReceiveScreen({super.key, required this.client, this.user = ''});
+  final String initialBarcode;
+  final String initialMode; // 'receive' | 'count' | '' (= stored pref)
+  const ReceiveScreen(
+      {super.key,
+      required this.client,
+      this.user = '',
+      this.initialBarcode = '',
+      this.initialMode = ''});
 
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
@@ -44,6 +51,19 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   bool _skuOverride = false;
   bool _showPriceAdjust = false;
   bool _addLabel = true;
+  bool _quantBlocked = false;
+  Future<void> Function()? _retrySave;
+  bool _converting = false;
+
+  bool _isQuantBlocked(String msg) =>
+      msg.contains('Quants') || msg.contains('refuses stock');
+
+  void _resetSaveState() {
+    _quantBlocked = false;
+    _retrySave = null;
+    _reasonRequired = false;
+    _skuOverride = false;
+  }
 
   // new-product form
   final _newName = TextEditingController();
@@ -70,9 +90,20 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     super.initState();
     _loadPrefs();
     _loadCats();
+    if (widget.initialBarcode.trim().isNotEmpty) {
+      _barcode.text = widget.initialBarcode.trim();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _lookup());
+    }
   }
 
   Future<void> _loadPrefs() async {
+    if (widget.initialMode == 'receive' || widget.initialMode == 'count') {
+      setState(() {
+        _mode = widget.initialMode;
+        if (_isCount) _qty.text = '';
+      });
+      return;
+    }
     final m = await SessionStore.loadInvMode();
     if (!mounted) return;
     setState(() {
@@ -96,19 +127,6 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _newPrice.dispose();
     _newQty.dispose();
     super.dispose();
-  }
-
-  Future<void> _setMode(String m) async {
-    await SessionStore.saveInvMode(m);
-    if (!mounted) return;
-    setState(() {
-      _mode = m;
-      _err = null;
-      _reasonRequired = false;
-      _skuOverride = false;
-      _showPriceAdjust = false;
-      _qty.text = _isCount ? '' : '1';
-    });
   }
 
   Future<void> _loadCats() async {
@@ -165,13 +183,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   Future<void> _lookup() async {
     final code = _barcode.text.trim();
     if (code.isEmpty || _busy) return;
+    _resetSaveState();
     setState(() {
       _busy = true;
       _err = null;
       _found = null;
       _duplicates = [];
-      _reasonRequired = false;
-      _skuOverride = false;
     });
     try {
       final rows = await widget.client.findVariants(code);
@@ -210,6 +227,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _price.text = p.listPrice.toStringAsFixed(2);
     _qty.text = _isCount ? '' : '1';
     _reason.clear();
+    _resetSaveState();
     setState(() {
       _found = p;
       _duplicates = [];
@@ -308,39 +326,22 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   void _afterSave(String toast) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(toast)));
+    _resetSaveState();
     setState(() {
       _barcode.clear();
       _found = null;
-      _reasonRequired = false;
-      _skuOverride = false;
     });
   }
 
-  /// Receive + : Add stock button.
-  Future<void> _addStock() async {
-    final p = _found;
-    if (p == null || _busy) return;
-    if (_name.text.trim().length < 2 && _name.text.trim() != p.name) {
-      setState(() => _err = 'Name must be at least 2 characters.');
-      return;
-    }
-    final qty = _num(_qty.text);
-    if (qty.isNaN || qty < 1) {
-      setState(() => _err = 'Enter qty to add (≥ 1).');
-      return;
-    }
-    final checked = _checkPrices(p);
-    if (checked == null) return;
+  /// Stock-write half of Add stock, rerunnable after an in-app convert.
+  Future<void> _finishAddStock(
+      InventoryProduct p, double qty, double price) async {
+    if (_busy) return;
     setState(() {
       _busy = true;
       _err = null;
     });
     try {
-      if (!await _checkSku(p)) {
-        if (mounted) setState(() => _busy = false);
-        return;
-      }
-      await _applyNameSkuPrices(p, checked.cost, checked.price, checked.reason);
       final after = await widget.client.addStock(p, qty);
       _audit('receive', p, 'qty', p.qtyAvailable.toStringAsFixed(0),
           after.toStringAsFixed(0), '');
@@ -348,7 +349,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         BatchStore.instance.add(
           barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
           name: _name.text.trim().isNotEmpty ? _name.text.trim() : p.name,
-          price: checked.price,
+          price: price,
           defaultCode: _sku.text.trim(),
           category: _catLabel(),
         );
@@ -358,7 +359,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       }
       _afterSave('Saved ${p.name} +$qty → $after');
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (!mounted) return;
+      if (_isQuantBlocked(e.message)) {
+        setState(() {
+          _err = e.message;
+          _quantBlocked = true;
+          _retrySave = () => _finishAddStock(p, qty, price);
+        });
+        return;
+      }
+      setState(() => _err = e.message);
     } catch (e) {
       if (mounted) setState(() => _err = e.toString());
     } finally {
@@ -366,10 +376,95 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
-  /// Receive + : Save prices only (no stock change).
-  Future<void> _savePricesOnly() async {
+  /// Stock-write half of Set count, rerunnable after an in-app convert.
+  Future<void> _finishSetCount(
+      InventoryProduct p, double counted, double price) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    try {
+      final after = await widget.client.setStock(p, counted);
+      _audit('count', p, 'qty', p.qtyAvailable.toStringAsFixed(0),
+          after.toStringAsFixed(0), '');
+      if (_addLabel) {
+        BatchStore.instance.add(
+          barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
+          name: p.name,
+          price: price,
+          defaultCode: p.defaultCode,
+          category: _catLabel(),
+        );
+      }
+      _afterSave('Counted ${p.name}: → $after');
+    } on OdooException catch (e) {
+      if (!mounted) return;
+      if (_isQuantBlocked(e.message)) {
+        setState(() {
+          _err = e.message;
+          _quantBlocked = true;
+          _retrySave = () => _finishSetCount(p, counted, price);
+        });
+        return;
+      }
+      setState(() => _err = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _err = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// One-tap recovery: flip the template to Storable, then rerun the
+  /// pending save (or just confirm when nothing is pending).
+  Future<void> _convertAndRetry() async {
+    final p = _found;
+    if (p == null || _converting) return;
+    final retry = _retrySave;
+    setState(() {
+      _converting = true;
+      _err = null;
+    });
+    try {
+      await widget.client.setStorable(p);
+      _audit('receive', p, 'is_storable', 'false', 'true', 'in-app convert');
+      if (!mounted) return;
+      setState(() {
+        _found = p.asStorable();
+        _quantBlocked = false;
+      });
+      if (retry != null) {
+        setState(() => _retrySave = null);
+        await retry();
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${p.name} is now Storable — save again.')));
+      }
+    } on OdooException catch (e) {
+      if (mounted) setState(() => _err = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _err = e.toString());
+    } finally {
+      if (mounted) setState(() => _converting = false);
+    }
+  }
+
+  /// Receive + : single Update button (details + optional stock add).
+  Future<void> _updateItem() async {
     final p = _found;
     if (p == null || _busy) return;
+    if (_name.text.trim().length < 2 && _name.text.trim() != p.name) {
+      setState(() => _err = 'Name must be at least 2 characters.');
+      return;
+    }
+    final qtyRaw = _qty.text.trim();
+    final qty = qtyRaw.isEmpty ? 0.0 : _num(qtyRaw);
+    if (qty.isNaN || qty < 0) {
+      setState(
+          () => _err = 'Enter qty to add (≥ 0), or leave empty for details only.');
+      return;
+    }
     final checked = _checkPrices(p);
     if (checked == null) return;
     setState(() {
@@ -382,7 +477,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         return;
       }
       await _applyNameSkuPrices(p, checked.cost, checked.price, checked.reason);
-      _afterSave('Prices saved for ${p.name} (no stock change)');
+      if (qty > 0) {
+        if (mounted) setState(() => _busy = false);
+        await _finishAddStock(p, qty, checked.price);
+      } else {
+        _afterSave('Updated ${p.name} (no stock change)');
+      }
     } on OdooException catch (e) {
       if (mounted) setState(() => _err = e.message);
     } catch (e) {
@@ -444,19 +544,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         }
         await _applyNameSkuPrices(p, cost, price, reason);
       }
-      final after = await widget.client.setStock(p, counted);
-      _audit('count', p, 'qty', p.qtyAvailable.toStringAsFixed(0),
-          after.toStringAsFixed(0), '');
-      if (_addLabel) {
-        BatchStore.instance.add(
-          barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
-          name: p.name,
-          price: price,
-          defaultCode: p.defaultCode,
-          category: _catLabel(),
-        );
-      }
-      _afterSave('Counted ${p.name}: → $after');
+      if (mounted) setState(() => _busy = false);
+      await _finishSetCount(p, counted, price);
     } on OdooException catch (e) {
       if (mounted) setState(() => _err = e.message);
     } catch (e) {
@@ -594,28 +683,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final showCreate = code.isNotEmpty && _found == null && _duplicates.isEmpty && !_busy;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Receive'),
+        title: Text(_isCount ? 'Update count' : 'Receive delivery'),
         actions: [
           IconButton(
-            tooltip: 'Continuous scan',
+            tooltip: 'Rapid scan',
             icon: const Icon(Icons.burst_mode),
             onPressed: _busy ? null : _openContinuous,
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(52),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'receive', label: Text('Receive +')),
-                ButtonSegment(value: 'count', label: Text('Count =')),
-              ],
-              selected: {_mode},
-              onSelectionChanged: (s) => _setMode(s.first),
-            ),
-          ),
-        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -671,6 +746,36 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     );
   }
 
+  Widget _convertBanner(InventoryProduct p) {
+    final kind = p.type == 'service' ? 'Service' : 'Consumable';
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('No stock tracking ($kind)',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+          const Text(
+              'Odoo cannot hold stock for this type. Convert it to Storable to save quantities here.'),
+          const SizedBox(height: 8),
+          FilledButton(
+            onPressed:
+                (_busy || _converting) ? null : _convertAndRetry,
+            child: Text(_converting
+                ? 'Converting…'
+                : (_retrySave != null
+                    ? 'Convert to Storable & retry'
+                    : 'Convert to Storable')),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _duplicateCard() {
     return Card(
       color: Colors.orange.shade50,
@@ -710,6 +815,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             const SizedBox(height: 4),
             Text(
                 'Barcode: ${p.barcode.isNotEmpty ? p.barcode : '—'}  •  On-hand: ${p.qtyAvailable.toStringAsFixed(0)}'),
+            if (!p.tracksStock || _quantBlocked) ...[
+              const SizedBox(height: 8),
+              _convertBanner(p),
+            ],
             const SizedBox(height: 12),
             TextField(
               controller: _name,
@@ -756,6 +865,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                   labelText: _isCount ? 'Counted qty' : 'Qty to add',
+                  helperText:
+                      _isCount ? null : 'Leave empty for details only',
                   border: const OutlineInputBorder()),
             ),
             if (_reasonRequired) ...[
@@ -790,19 +901,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               SizedBox(
                 height: 52,
                 child: FilledButton(
-                  onPressed: _busy ? null : _addStock,
-                  child: const Text('Add stock',
+                  onPressed: _busy ? null : _updateItem,
+                  child: const Text('Update',
                       style: TextStyle(fontSize: 18)),
-                ),
-              ),
-            if (!_isCount) const SizedBox(height: 8),
-            if (!_isCount)
-              SizedBox(
-                height: 52,
-                child: OutlinedButton(
-                  onPressed: _busy ? null : _savePricesOnly,
-                  child: const Text('Save prices only',
-                      style: TextStyle(fontSize: 16)),
                 ),
               ),
             if (_isCount)
@@ -938,7 +1039,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 ),
                 const Align(
                   alignment: Alignment.centerLeft,
-                  child: Chip(label: Text('Type: consumable')),
+                  child: Chip(label: Text('Stock tracked')),
                 ),
               ],
             ),

@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:cloud9_inventory_app/audit_log.dart';
 import 'package:cloud9_inventory_app/batch_store.dart';
 import 'package:cloud9_inventory_app/category_map.dart';
 import 'package:cloud9_inventory_app/odoo_client.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 void main() {
   test('category map resolves seeded pair', () {
@@ -43,6 +47,71 @@ void main() {
     expect(
         BatchStore.keyOf(barcode: '', defaultCode: '', name: 'A'),
         BatchStore.keyOf(barcode: '', defaultCode: '', name: 'a'));
+  });
+
+  test('quant error is translated to actionable text', () {
+    final out = OdooException.friendly(
+        'Quants cannot be created for consumables or services.');
+    expect(out, contains('Storable'));
+    expect(
+        OdooException.friendly('Some other error'), 'Some other error');
+  });
+
+  test('setStorable enables stock tracking on the template', () async {
+    String? lastBody;
+    final mock = MockClient((req) async {
+      lastBody = req.body;
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    const p = InventoryProduct(
+      variantId: 1,
+      tmplId: 42,
+      name: 'n',
+      barcode: 'b',
+      defaultCode: '',
+      listPrice: 1,
+      standardPrice: 1,
+      qtyAvailable: 0,
+      posCategId: null,
+      type: 'consu',
+      isStorable: false,
+    );
+    expect(p.tracksStock, isFalse);
+    await client.setStorable(p);
+    expect(lastBody, contains('[42]'));
+    expect(lastBody, contains('"is_storable":true'));
+    expect(p.asStorable().tracksStock, isTrue);
+  });
+
+  test('stock tracking parses from is_storable', () {
+    final tracked = InventoryProduct.fromMap({
+      'id': 1,
+      'product_tmpl_id': [2, 't'],
+      'name': 'n',
+      'type': 'consu',
+      'is_storable': true,
+    });
+    expect(tracked.tracksStock, isTrue);
+    final untracked = InventoryProduct.fromMap({
+      'id': 1,
+      'product_tmpl_id': [2, 't'],
+      'name': 'n',
+      'type': 'consu',
+      'is_storable': false,
+    });
+    expect(untracked.tracksStock, isFalse);
+  });
+
+  test('product type defaults to storable when absent', () {
+    final p = InventoryProduct.fromMap({
+      'id': 1,
+      'product_tmpl_id': [2, 't'],
+      'name': 'n',
+    });
+    expect(p.type, 'consu');
+    expect(p.tracksStock, isTrue);
   });
 
   test('audit log caps at 200 entries', () {

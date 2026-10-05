@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
-        android:label="cloud9_inventory_app"
+        android:label="Cloud 9 Inventory"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

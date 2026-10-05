@@ -12,6 +12,16 @@ class OdooException implements Exception {
   OdooException(this.message);
   @override
   String toString() => 'OdooException: $message';
+
+  /// Translate known Odoo server errors into actionable staff-facing text.
+  static String friendly(String msg) {
+    if (msg.contains('Quants cannot be created')) {
+      return 'Odoo refuses stock for products without stock tracking. '
+          'In Odoo, open the product and enable stock tracking '
+          '(Storable / Track Inventory), then try again. ($msg)';
+    }
+    return msg;
+  }
 }
 
 /// Minimal product view used by the Receive screen.
@@ -25,6 +35,8 @@ class InventoryProduct {
   final double standardPrice;
   final double qtyAvailable;
   final int? posCategId;
+  final String type; // 'consu' | 'service' | 'combo'
+  final bool isStorable; // Odoo 18 gate for quants (type stays 'consu')
 
   const InventoryProduct({
     required this.variantId,
@@ -36,7 +48,25 @@ class InventoryProduct {
     required this.standardPrice,
     required this.qtyAvailable,
     required this.posCategId,
+    this.type = 'consu',
+    this.isStorable = true,
   });
+
+  bool get tracksStock => isStorable;
+
+  InventoryProduct asStorable() => InventoryProduct(
+        variantId: variantId,
+        tmplId: tmplId,
+        name: name,
+        barcode: barcode,
+        defaultCode: defaultCode,
+        listPrice: listPrice,
+        standardPrice: standardPrice,
+        qtyAvailable: qtyAvailable,
+        posCategId: posCategId,
+        type: type,
+        isStorable: true,
+      );
 
   static double _d(dynamic v) {
     if (v is num) return v.toDouble();
@@ -60,6 +90,8 @@ class InventoryProduct {
       standardPrice: _d(m['standard_price']),
       qtyAvailable: _d(m['qty_available']),
       posCategId: posId,
+      type: (m['type'] ?? 'consu').toString(),
+      isStorable: m['is_storable'] is bool ? m['is_storable'] as bool : true,
     );
   }
 }
@@ -109,7 +141,7 @@ class OdooClient {
               ? err['data']['message'].toString()
               : err['message']?.toString() ?? 'Odoo error')
           : err.toString();
-      throw OdooException(msg);
+      throw OdooException(OdooException.friendly(msg));
     }
     return body as Map<String, dynamic>;
   }
@@ -198,6 +230,8 @@ class OdooClient {
         'standard_price',
         'pos_categ_ids',
         'qty_available',
+        'type',
+        'is_storable',
       ],
       'limit': 2,
     });
@@ -262,23 +296,10 @@ class OdooClient {
         ['barcode', '=', c],
         ['default_code', '=', c],
       ],
-      'fields': [
-        'id',
-        'product_tmpl_id',
-        'name',
-        'barcode',
-        'default_code',
-        'list_price',
-        'standard_price',
-        'pos_categ_ids',
-        'qty_available',
-      ],
+      'fields': _productFields,
       'limit': 5,
     });
-    return (result as List)
-        .map((e) => InventoryProduct.fromMap(
-            (e as Map).cast<String, dynamic>()))
-        .toList();
+    return _toProducts(result);
   }
 
   /// Variants using [sku] as default_code (for the SKU collision check).
@@ -289,23 +310,69 @@ class OdooClient {
       'domain': [
         ['default_code', '=', s]
       ],
-      'fields': [
-        'id',
-        'product_tmpl_id',
-        'name',
-        'barcode',
-        'default_code',
-        'list_price',
-        'standard_price',
-        'pos_categ_ids',
-        'qty_available',
-      ],
+      'fields': _productFields,
       'limit': 2,
     });
-    return (result as List)
-        .map((e) => InventoryProduct.fromMap(
-            (e as Map).cast<String, dynamic>()))
-        .toList();
+    return _toProducts(result);
+  }
+
+  static const List<String> _productFields = [
+    'id',
+    'product_tmpl_id',
+    'name',
+    'barcode',
+    'default_code',
+    'list_price',
+    'standard_price',
+    'pos_categ_ids',
+    'qty_available',
+    'type',
+    'is_storable',
+  ];
+
+  static List<InventoryProduct> _toProducts(dynamic result) => (result as List)
+      .map((e) =>
+          InventoryProduct.fromMap((e as Map).cast<String, dynamic>()))
+      .toList();
+
+  /// Browse products for the View/Manage lists: free-text search over
+  /// name/barcode/SKU plus optional POS-category filter, paged.
+  /// Returns at most [limit] rows; [more] is true when a full page came
+  /// back (caller bumps [offset] for the next page).
+  Future<({List<InventoryProduct> rows, bool more})> searchProducts({
+    String query = '',
+    int? posCategId,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final q = query.trim();
+    final domain = <dynamic>[];
+    if (q.isNotEmpty) {
+      domain.addAll([
+        '|',
+        '|',
+        ['name', 'ilike', q],
+        ['barcode', 'ilike', q],
+        ['default_code', 'ilike', q],
+      ]);
+    }
+    if (posCategId != null) {
+      if (domain.isNotEmpty) domain.insert(0, '&');
+      domain.add([
+        'pos_categ_ids',
+        'in',
+        [posCategId]
+      ]);
+    }
+    final result = await callKw('product.product', 'search_read', [], kwargs: {
+      'domain': domain,
+      'fields': _productFields,
+      'limit': limit,
+      'offset': offset,
+      'order': 'name',
+    });
+    final rows = _toProducts(result);
+    return (rows: rows, more: rows.length >= limit);
   }
 
   Future<int> _stockLocationId() async {
@@ -363,6 +430,16 @@ class OdooClient {
     await callKw('product.product', 'write', [
       [p.variantId],
       {'default_code': s.isEmpty ? false : s},
+    ]);
+  }
+
+  /// Enable stock tracking on the template so it can hold quants.
+  /// Odoo 18 gate is is_storable (type stays 'consu'). In-app recovery
+  /// for pre-existing untracked products.
+  Future<void> setStorable(InventoryProduct p) async {
+    await callKw('product.template', 'write', [
+      [p.tmplId],
+      {'is_storable': true},
     ]);
   }
 
@@ -460,7 +537,10 @@ class OdooClient {
         'sale_ok': saleOk,
         'purchase_ok': purchaseOk,
         'available_in_pos': saleOk,
+        // Odoo 18: type stays 'consu'; stock tracking is the is_storable
+        // flag (the quant gate). 'product' is not a valid type value.
         'type': 'consu',
+        'is_storable': true,
       }
     ]) as int;
     // Barcode lives on the variant in Odoo 18: set it on the single variant.

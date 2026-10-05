@@ -35,6 +35,7 @@ class SessionStore {
 
   static Future<void> clear() async {
     await storage.delete(key: _kCookie);
+    await storage.delete(key: _kUser);
   }
 
   static Future<int?> loadLastPosCat() async {
@@ -69,5 +70,21 @@ class SessionStore {
   static Future<void> saveContinuous(bool v) async {
     final p = await SharedPreferences.getInstance();
     await p.setBool(_kContinuous, v);
+  }
+
+  // Local per-product expiry dates (yyyy-MM-dd) captured in Add inventory.
+  // Odoo lot-tracked expiry needs lot tracking enabled on the product —
+  // P1 follow-up; until then the app keeps the date per variant and shows
+  // it in View/Manage.
+  static String _expiryKey(int variantId) => 'expiry_$variantId';
+
+  static Future<String?> loadExpiry(int variantId) async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_expiryKey(variantId));
+  }
+
+  static Future<void> saveExpiry(int variantId, String ymd) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_expiryKey(variantId), ymd);
   }
 }

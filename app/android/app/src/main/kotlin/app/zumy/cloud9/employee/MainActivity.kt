@@ -1,4 +1,4 @@
-package net.cloud9market.cloud9_inventory_app
+package app.zumy.cloud9.employee
 
 import io.flutter.embedding.android.FlutterActivity
 

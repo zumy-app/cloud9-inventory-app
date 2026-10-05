@@ -16,6 +16,17 @@ Release APK for sideload:
 flutter build apk --release --dart-define API_BASE=https://admin.cloud9market.net
 ```
 
+Redeploy to a store phone WITHOUT wiping the saved login (do NOT use
+`flutter install` — it uninstalls first and Android deletes all app data
+including the secure session):
+
+```bash
+adb -s <device-id> install -r build\app\outputs\flutter-apk\app-debug.apk
+```
+
+The `-r` reinstall keeps app data, so the session cookie in secure storage
+survives and the app opens straight into Inventory.
+
 ## Test
 
 ```bash

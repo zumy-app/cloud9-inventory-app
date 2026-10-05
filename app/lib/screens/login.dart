@@ -63,6 +63,8 @@ class _LoginScreenState extends State<LoginScreen> {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              Image.asset('assets/logo.png', height: 110),
+              const SizedBox(height: 8),
               const Text('https://admin.cloud9market.net',
                   style: TextStyle(color: Colors.grey)),
               const Text('DB: odoo', style: TextStyle(color: Colors.grey)),

@@ -27,10 +27,10 @@ If it’s not needed to receive a box today, it’s out.
    * **Found, Receive + mode (additive):** show name, barcode, SKU, on-hand,
      cost, price. Editable: name, `Qty to add (≥1, default 1, stepper+keypad)`,
      cost, price, SKU, Category (single autocomplete, §Category mapping).
-     Buttons are separate, never one ambiguous Save: `Add stock` writes
-     `inventory_quantity = on-hand + entered` (+ prices if changed); secondary
-     `Save prices only` writes template prices with no stock implication.
-     Toast, clear, focus scan. No draft, no batch, no undo (fix in Odoo).
+     One `Update` button saves everything changed: details always, plus
+     stock (`on-hand + entered`) when a qty is entered — empty qty means
+     details only (stated under the field and in the toast). Show toast,
+     clear, focus scan. No draft, no batch, no undo (fix in Odoo).
    * **Found, Count = mode (absolute):** qty field blank by default (forced
      entry — no silent zero). Price fields hidden behind `Adjust price` link.
      `Set count` requires qty ≥ 0 then mandates a `before → after` confirm
@@ -42,7 +42,9 @@ If it’s not needed to receive a box today, it’s out.
      (default ON, inside collapsed Details). `Create & next` creates
      `product.template` (`available_in_pos=True, sale_ok=True,
      purchase_ok=True`, mapped `categ_id`, `pos_categ_ids=[[6,0,[id]]]`,
-     `type=consu`) → variant barcode write → initial quant; shows `0 → qty`
+     `type=consu` + `is_storable=True` (Odoo 18 gate for quants — `product`
+     is not a valid type value)
+     ) → variant barcode write → initial quant; shows `0 → qty`
      confirm line. No image, no supplier, no expiry.
    * **Price guard:** new price `< cost` or `|Δ| > 20%` (config constant) shows
      inline warning; below-cost writes additionally require a typed reason

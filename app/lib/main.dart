@@ -1,4 +1,4 @@
-// MVP entry: login gate + tabs Receive | Labels | Account.
+// Inventory home + tabs (Inventory | Labels | Account).
 library;
 
 import 'package:flutter/material.dart';
@@ -6,9 +6,75 @@ import 'package:flutter/material.dart';
 import 'batch_store.dart';
 import 'odoo_client.dart';
 import 'screens/batch.dart';
+import 'screens/inventory_home.dart';
 import 'screens/login.dart';
-import 'screens/receive.dart';
 import 'session_store.dart';
+
+/// Brand palette sampled from the Cloud 9 Kitchen & Market oval:
+/// orange field, white lettering, near-black outline.
+const _brandOrange = Color(0xFFF26522);
+const _brandInk = Color(0xFF141414);
+
+ThemeData _brandTheme() {
+  const scheme = ColorScheme.light(
+    primary: _brandOrange,
+    onPrimary: Colors.white,
+    secondary: _brandInk,
+    onSecondary: Colors.white,
+    surface: Colors.white,
+    onSurface: _brandInk,
+    surfaceContainerHighest: Color(0xFFFFEDE3),
+    error: Color(0xFFB3261E),
+  );
+  WidgetStateProperty<Color?> selectedWhite(Color unselected) =>
+      WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? Colors.white : unselected);
+  return ThemeData(
+    colorScheme: scheme,
+    scaffoldBackgroundColor: Colors.white,
+    useMaterial3: true,
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.white,
+      foregroundColor: _brandInk,
+      elevation: 0,
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: _brandOrange,
+        foregroundColor: Colors.white,
+        textStyle: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(foregroundColor: _brandInk),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(foregroundColor: _brandOrange),
+    ),
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: _brandOrange,
+      foregroundColor: Colors.white,
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: selectedWhite(Colors.grey),
+      trackColor: WidgetStateProperty.resolveWith((s) =>
+          s.contains(WidgetState.selected) ? _brandOrange : Colors.black12),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: Colors.white,
+      indicatorColor: _brandOrange,
+      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(
+          color: s.contains(WidgetState.selected)
+              ? Colors.white
+              : _brandInk)),
+      labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(
+          color: s.contains(WidgetState.selected) ? _brandInk : Colors.grey,
+          fontWeight: s.contains(WidgetState.selected)
+              ? FontWeight.bold
+              : FontWeight.normal)),
+    ),
+  );
+}
 
 void main() {
   runApp(const Cloud9App());
@@ -78,10 +144,7 @@ class _Cloud9AppState extends State<Cloud9App> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Cloud 9 Inventory',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
-        useMaterial3: true,
-      ),
+      theme: _brandTheme(),
       home: !_ready
           ? const Scaffold(
               body: Center(child: CircularProgressIndicator()))
@@ -91,7 +154,7 @@ class _Cloud9AppState extends State<Cloud9App> {
                   body: IndexedStack(
                     index: _tab,
                     children: [
-                      ReceiveScreen(client: _client, user: _user),
+                      InventoryHome(client: _client, user: _user),
                       const BatchScreen(),
                       _AccountTab(
                           user: _user,
@@ -106,7 +169,7 @@ class _Cloud9AppState extends State<Cloud9App> {
                     destinations: const [
                       NavigationDestination(
                           icon: Icon(Icons.inventory_2),
-                          label: 'Receive'),
+                          label: 'Inventory'),
                       NavigationDestination(
                           icon: Icon(Icons.label), label: 'Labels'),
                       NavigationDestination(
