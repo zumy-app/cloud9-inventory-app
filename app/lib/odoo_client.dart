@@ -74,6 +74,12 @@ class InventoryProduct {
     return 0;
   }
 
+  /// Odoo returns boolean false for unset char fields — never show "false".
+  static String _s(dynamic v) {
+    if (v == null || v is bool) return '';
+    return v.toString();
+  }
+
   factory InventoryProduct.fromMap(Map<String, dynamic> m) {
     final tmpl = m['product_tmpl_id'];
     final tmplId = tmpl is List && tmpl.isNotEmpty ? (tmpl[0] as num).toInt() : 0;
@@ -83,9 +89,9 @@ class InventoryProduct {
     return InventoryProduct(
       variantId: (m['id'] as num).toInt(),
       tmplId: tmplId,
-      name: (m['name'] ?? '').toString(),
-      barcode: (m['barcode'] ?? '').toString(),
-      defaultCode: (m['default_code'] ?? '').toString(),
+      name: _s(m['name']),
+      barcode: _s(m['barcode']),
+      defaultCode: _s(m['default_code']),
       listPrice: _d(m['list_price']),
       standardPrice: _d(m['standard_price']),
       qtyAvailable: _d(m['qty_available']),
