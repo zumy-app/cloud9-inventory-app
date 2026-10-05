@@ -493,11 +493,36 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   }
 
   /// Count = : Set count button with mandatory before → after confirm.
+  /// Blank qty + Adjust price = prices-only fix (no stock write).
   Future<void> _setCount() async {
     final p = _found;
     if (p == null || _busy) return;
-    if (_qty.text.trim().isEmpty) {
+    if (_qty.text.trim().isEmpty && !_showPriceAdjust) {
       setState(() => _err = 'Enter the counted qty (no default in Count mode).');
+      return;
+    }
+    if (_qty.text.trim().isEmpty) {
+      final checked = _checkPrices(p);
+      if (checked == null) return;
+      setState(() {
+        _busy = true;
+        _err = null;
+      });
+      try {
+        if (!await _checkSku(p)) {
+          if (mounted) setState(() => _busy = false);
+          return;
+        }
+        await _applyNameSkuPrices(
+            p, checked.cost, checked.price, checked.reason);
+        _afterSave('Prices updated for ${p.name} (no count change)');
+      } on OdooException catch (e) {
+        if (mounted) setState(() => _err = e.message);
+      } catch (e) {
+        if (mounted) setState(() => _err = e.toString());
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
       return;
     }
     final counted = _num(_qty.text);
@@ -865,8 +890,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                   labelText: _isCount ? 'Counted qty' : 'Qty to add',
-                  helperText:
-                      _isCount ? null : 'Leave empty for details only',
+                  helperText: _isCount
+                      ? 'Leave empty for prices only'
+                      : 'Leave empty for details only',
                   border: const OutlineInputBorder()),
             ),
             if (_reasonRequired) ...[

@@ -11,6 +11,7 @@ import '../batch_store.dart';
 import '../category_map.dart';
 import '../odoo_client.dart';
 import '../session_store.dart';
+import 'receive.dart';
 import 'scan.dart';
 
 class AddItemScreen extends StatefulWidget {
@@ -39,6 +40,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
   bool _busy = false;
   bool _catsLoading = false;
   String? _err;
+  bool _continuous = true;
+  InventoryProduct? _existing;
 
   CategoryPair? get _pair {
     if (_catId == null) return null;
@@ -51,6 +54,9 @@ class _AddItemScreenState extends State<AddItemScreen> {
   void initState() {
     super.initState();
     _loadCats();
+    SessionStore.loadContinuous().then((v) {
+      if (mounted) setState(() => _continuous = v);
+    });
   }
 
   @override
@@ -94,9 +100,36 @@ class _AddItemScreenState extends State<AddItemScreen> {
     final code = await Navigator.of(context).push<String>(
       MaterialPageRoute(builder: (_) => const ScanScreen()),
     );
-    if (code != null && code.trim().isNotEmpty) {
-      setState(() => _barcode.text = code.trim());
-    }
+    if (code == null || code.trim().isEmpty || !mounted) return;
+    setState(() {
+      _barcode.text = code.trim();
+      _existing = null;
+      _err = null;
+    });
+    // Route existing items to Update count instead of duplicating them.
+    try {
+      final rows = await widget.client.findVariants(code.trim());
+      if (!mounted) return;
+      if (rows.isNotEmpty) {
+        setState(() => _existing = rows.first);
+      }
+    } on OdooException catch (e) {
+      if (mounted) setState(() => _err = e.message);
+    } catch (_) {}
+  }
+
+  void _updateInstead() {
+    final p = _existing;
+    if (p == null) return;
+    final code = p.barcode.isNotEmpty ? p.barcode : p.defaultCode;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ReceiveScreen(
+        client: widget.client,
+        user: widget.user,
+        initialBarcode: code,
+        initialMode: 'count',
+      ),
+    ));
   }
 
   Future<void> _pickExpiry() async {
@@ -189,7 +222,9 @@ class _AddItemScreenState extends State<AddItemScreen> {
         _name.clear();
         _sku.clear();
         _expiry = null;
+        _existing = null;
       });
+      if (_continuous && mounted) await _scan();
     } on OdooException catch (e) {
       if (mounted) setState(() => _err = e.message);
     } catch (e) {
@@ -227,6 +262,42 @@ class _AddItemScreenState extends State<AddItemScreen> {
             decoration: const InputDecoration(
                 labelText: 'Barcode (or type it)',
                 border: OutlineInputBorder()),
+          ),
+          if (_existing != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                      'Already in inventory: ${_existing!.name} (on-hand: ${_existing!.qtyAvailable.toStringAsFixed(0)})',
+                      style:
+                          const TextStyle(fontWeight: FontWeight.bold)),
+                  const Text(
+                      'Creating again would duplicate it. Update it instead.'),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    onPressed: _busy ? null : _updateInstead,
+                    child: const Text('Update count instead'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Continuous add'),
+            subtitle: const Text('Scan the next item right after saving'),
+            value: _continuous,
+            onChanged: (v) {
+              setState(() => _continuous = v);
+              SessionStore.saveContinuous(v);
+            },
           ),
           const SizedBox(height: 8),
           TextField(

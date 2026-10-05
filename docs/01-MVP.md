@@ -36,6 +36,7 @@ If it’s not needed to receive a box today, it’s out.
      `Set count` requires qty ≥ 0 then mandates a `before → after` confirm
      sheet showing the resulting absolute number; write sets
      `inventory_quantity = counted` directly (new `setStock`, not `addStock`).
+     Blank qty + `Adjust price` = prices-only fix, no stock write.
    * **Not found (both modes):** form prefilled locked `barcode=<scan>`:
      `name* (≥2 chars), Category* (default = last pair), cost, price, qty,
      SKU (auto-suggest = scan if numeric)`, sellable/purchasable toggles

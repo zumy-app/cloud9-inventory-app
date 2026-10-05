@@ -4,10 +4,12 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../odoo_client.dart';
 import '../session_store.dart';
 import 'receive.dart';
+import 'scan.dart';
 
 class BrowseScreen extends StatefulWidget {
   final OdooClient client;
@@ -167,6 +169,17 @@ class _BrowseScreenState extends State<BrowseScreen> {
     );
   }
 
+  Future<void> _scan() async {
+    HapticFeedback.lightImpact();
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const ScanScreen()),
+    );
+    if (code != null && code.trim().isNotEmpty && mounted) {
+      setState(() => _search.text = code.trim());
+      await _refresh();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -175,15 +188,30 @@ class _BrowseScreenState extends State<BrowseScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: TextField(
-              controller: _search,
-              decoration: const InputDecoration(
-                labelText: 'Search name, barcode, or SKU',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.search),
-              ),
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _refresh(),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _search,
+                    decoration: const InputDecoration(
+                      labelText: 'Search name, barcode, or SKU',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _refresh(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 56,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Scan'),
+                    onPressed: _busy ? null : _scan,
+                  ),
+                ),
+              ],
             ),
           ),
           Padding(
