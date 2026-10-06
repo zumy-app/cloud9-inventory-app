@@ -98,6 +98,7 @@ class Tspl {
   }
 
   /// Encode a composed label for the wire (TSPL is byte-oriented).
+  /// Non-Latin-1 chars are replaced with '?' (latin1.encode throws on them).
   static List<int> encode(String tspl) =>
-      latin1.encode(tspl, allowInvalid: true);
+      latin1.encode(tspl.replaceAll(RegExp(r'[^\x00-\xFF]'), '?'));
 }

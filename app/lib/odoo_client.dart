@@ -116,6 +116,14 @@ class OdooClient {
   final http.Client _http;
   String? _sessionCookie;
 
+  // In-memory category cache (per MVP tech plan: fetch once, cache 24h).
+  // The app holds one shared OdooClient, so this covers every screen.
+  static const _catsTtl = Duration(hours: 24);
+  List<PosCategory>? _posCatsCache;
+  DateTime _posCatsCacheAt = DateTime.fromMillisecondsSinceEpoch(0);
+  List<PosCategory>? _internalCatsCache;
+  DateTime _internalCatsCacheAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   static const _jsonHeaders = {'Content-Type': 'application/json'};
 
   String get _base => baseUrl.replaceAll(RegExp(r'/+$'), '');
@@ -250,6 +258,11 @@ class OdooClient {
   }
 
   Future<List<PosCategory>> getPosCategories() async {
+    final now = DateTime.now();
+    if (_posCatsCache != null &&
+        now.difference(_posCatsCacheAt) < _catsTtl) {
+      return _posCatsCache!;
+    }
     final result =
         await callKw('pos.category', 'search_read', [], kwargs: {
       'domain': [],
@@ -257,11 +270,14 @@ class OdooClient {
       'limit': 200,
       'order': 'name',
     });
-    return (result as List).map((e) {
+    final cats = (result as List).map((e) {
       final m = (e as Map).cast<String, dynamic>();
       return PosCategory(
           id: (m['id'] as num).toInt(), name: (m['name'] ?? '').toString());
     }).toList();
+    _posCatsCache = cats;
+    _posCatsCacheAt = now;
+    return cats;
   }
 
   Future<int> _defaultCategId() async {
@@ -278,6 +294,11 @@ class OdooClient {
 
   /// Internal product categories (for the unified category mapping).
   Future<List<PosCategory>> getProductCategories() async {
+    final now = DateTime.now();
+    if (_internalCatsCache != null &&
+        now.difference(_internalCatsCacheAt) < _catsTtl) {
+      return _internalCatsCache!;
+    }
     final result =
         await callKw('product.category', 'search_read', [], kwargs: {
       'domain': [],
@@ -285,11 +306,14 @@ class OdooClient {
       'limit': 200,
       'order': 'name',
     });
-    return (result as List).map((e) {
+    final cats = (result as List).map((e) {
       final m = (e as Map).cast<String, dynamic>();
       return PosCategory(
           id: (m['id'] as num).toInt(), name: (m['name'] ?? '').toString());
     }).toList();
+    _internalCatsCache = cats;
+    _internalCatsCacheAt = now;
+    return cats;
   }
 
   /// All variants matching a barcode/default_code (for the duplicate picker).
@@ -436,6 +460,16 @@ class OdooClient {
     await callKw('product.product', 'write', [
       [p.variantId],
       {'default_code': s.isEmpty ? false : s},
+    ]);
+  }
+
+  /// Archive (deactivate) a product template: hides it from POS and scans.
+  /// Reversible in Odoo via the Archived filter. Used to clean up
+  /// duplicates / bad items from the app (with a confirm dialog).
+  Future<void> archiveProduct(InventoryProduct p) async {
+    await callKw('product.template', 'write', [
+      [p.tmplId],
+      {'active': false},
     ]);
   }
 

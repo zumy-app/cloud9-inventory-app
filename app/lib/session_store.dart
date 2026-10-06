@@ -46,6 +46,35 @@ class SessionStore {
   static Future<void> saveLastPosCat(int id) async {
     final p = await SharedPreferences.getInstance();
     await p.setInt(_kLastPosCat, id);
+    await saveRecentPosCat(id);
+  }
+
+  // Recently used POS categories (most-recent first, capped) for one-tap
+  // chips in the new-product forms. IDs that no longer exist in Odoo are
+  // filtered by the caller against the freshly loaded category list.
+  static const _kRecentPosCats = 'recent_pos_categ_ids';
+  static const recentCap = 5;
+
+  static Future<List<int>> loadRecentPosCats() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getStringList(_kRecentPosCats) ?? const [];
+    final out = <int>[];
+    for (final s in raw) {
+      final id = int.tryParse(s);
+      if (id != null && !out.contains(id)) out.add(id);
+    }
+    return out;
+  }
+
+  static Future<void> saveRecentPosCat(int id) async {
+    final p = await SharedPreferences.getInstance();
+    final recent = await loadRecentPosCats();
+    recent.remove(id);
+    recent.insert(0, id);
+    await p.setStringList(
+      _kRecentPosCats,
+      recent.take(recentCap).map((i) => i.toString()).toList(),
+    );
   }
 
   static const _kInvMode = 'inv_mode'; // 'receive' | 'count'

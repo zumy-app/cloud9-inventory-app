@@ -68,6 +68,129 @@ class CategoryMap {
 
   static String _norm(String s) => s.trim().toLowerCase();
 
+  /// Keyword hints: product-name token → base category key (values match
+  /// [_baseSynonyms] values). Conservative on purpose: ambiguous words
+  /// (apple, milk, bar, ticket) are left out so we rank instead of mislead.
+  static const Map<String, String> keywordToBase = {
+    // Drinks
+    'soda': 'drinks',
+    'pop': 'drinks',
+    'cola': 'drinks',
+    'pepsi': 'drinks',
+    'coke': 'drinks',
+    'juice': 'drinks',
+    'snapple': 'drinks',
+    'gatorade': 'drinks',
+    'lemonade': 'drinks',
+    'seltzer': 'drinks',
+    'sparkling': 'drinks',
+    'water': 'drinks',
+    'coffee': 'drinks',
+    'tea': 'drinks',
+    'beer': 'drinks',
+    'lager': 'drinks',
+    'drink': 'drinks',
+    'beverage': 'drinks',
+    // Snacks
+    'chips': 'snacks',
+    'candy': 'snacks',
+    'chocolate': 'snacks',
+    'cookie': 'snacks',
+    'cookies': 'snacks',
+    'cracker': 'snacks',
+    'crackers': 'snacks',
+    'gum': 'snacks',
+    'mints': 'snacks',
+    'nuts': 'snacks',
+    'popcorn': 'snacks',
+    'pretzel': 'snacks',
+    'pretzels': 'snacks',
+    'granola': 'snacks',
+    'snack': 'snacks',
+    // Tobacco
+    'cigarette': 'tobacco',
+    'cigarettes': 'tobacco',
+    'cigar': 'tobacco',
+    'cigars': 'tobacco',
+    'tobacco': 'tobacco',
+    'vape': 'tobacco',
+    'nicotine': 'tobacco',
+    'zyn': 'tobacco',
+    // Fresh Food
+    'sandwich': 'fresh food',
+    'sandwiches': 'fresh food',
+    'salad': 'fresh food',
+    'salads': 'fresh food',
+    'pizza': 'fresh food',
+    'hotdog': 'fresh food',
+    'donut': 'fresh food',
+    'donuts': 'fresh food',
+    'muffin': 'fresh food',
+    'deli': 'fresh food',
+    // Automotive
+    'oil': 'automotive',
+    'antifreeze': 'automotive',
+    'wiper': 'automotive',
+    'coolant': 'automotive',
+    // Propane
+    'propane': 'propane',
+    // Ice
+    'ice': 'ice',
+    // General Merchandise
+    'battery': 'general merchandise',
+    'batteries': 'general merchandise',
+    // Lottery/Games
+    'lottery': 'lottery/games',
+    'lotto': 'lottery/games',
+    'scratch': 'lottery/games',
+    // Services
+    'moneygram': 'services',
+    'fax': 'services',
+  };
+
+  static Set<String> _tokens(String s) => _norm(s)
+      .split(RegExp(r'[^a-z0-9/]+'))
+      .where((t) => t.isNotEmpty)
+      .toSet();
+
+  /// Base key for a POS category (e.g. "Beverages - Taxable" → "drinks").
+  static String? baseKeyFor(PosCategory c) =>
+      _baseSynonyms[_norm(_baseName(c.name))];
+
+  /// How well [c] matches [productName]: +3 per keyword hint hit, +2 per
+  /// name-token hit. 0 means "no signal".
+  static int matchScore(PosCategory c, String productName) {
+    final tokens = _tokens(productName);
+    if (tokens.isEmpty) return 0;
+    var s = 0;
+    final catName = _norm(c.name);
+    final base = baseKeyFor(c);
+    for (final t in tokens) {
+      if (catName.contains(t)) s += 2;
+      final hint = keywordToBase[t];
+      if (hint != null && hint == base) s += 3;
+    }
+    return s;
+  }
+
+  /// Order [cats] for the picker: best keyword match first, Odoo order kept
+  /// for ties. Never filters — every category stays selectable.
+  static List<PosCategory> rankForName(
+      List<PosCategory> cats, String productName) {
+    final ranked = List<PosCategory>.of(cats);
+    if (ranked.length < 2) return ranked;
+    final order = <int, int>{
+      for (var i = 0; i < cats.length; i++) cats[i].id: i
+    };
+    ranked.sort((a, b) {
+      final d =
+          matchScore(b, productName).compareTo(matchScore(a, productName));
+      if (d != 0) return d;
+      return (order[a.id] ?? 0).compareTo(order[b.id] ?? 0);
+    });
+    return ranked;
+  }
+
   /// Strip POS suffixes like " - Taxable", " - Nontaxable", " (…)", " / …".
   static String _baseName(String s) {
     var b = s.trim();

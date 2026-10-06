@@ -13,6 +13,7 @@ import '../odoo_client.dart';
 import '../print/label_model.dart';
 import '../print/printer_service.dart';
 import '../session_store.dart';
+import '../widgets/category_picker.dart';
 import 'receive.dart';
 import 'scan.dart';
 
@@ -39,6 +40,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
   List<PosCategory> _cats = [];
   List<PosCategory> _internalCats = [];
   int? _catId;
+  List<int> _recentCats = [];
   bool _busy = false;
   bool _catsLoading = false;
   String? _err;
@@ -90,10 +92,12 @@ class _AddItemScreenState extends State<AddItemScreen> {
         internal = await widget.client.getProductCategories();
       } catch (_) {}
       final last = await SessionStore.loadLastPosCat();
+      final recent = await SessionStore.loadRecentPosCats();
       if (!mounted) return;
       setState(() {
         _cats = cats;
         _internalCats = internal;
+        _recentCats = recent;
         if (last != null && cats.any((c) => c.id == last)) {
           _catId = last;
         } else if (cats.isNotEmpty) {
@@ -196,6 +200,17 @@ class _AddItemScreenState extends State<AddItemScreen> {
     });
     try {
       final pair = _pair!;
+      // Barcode collision: route to the existing item instead of duping it.
+      final clash = await widget.client.findVariants(code);
+      if (clash.isNotEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _existing = clash.first;
+          _err = 'Barcode already used by ${clash.first.name} — '
+              'update it instead.';
+        });
+        return;
+      }
       final vid = await widget.client.createProduct(
         name: name,
         barcode: code,
@@ -209,6 +224,9 @@ class _AddItemScreenState extends State<AddItemScreen> {
         purchaseOk: _purchaseOk,
       );
       await SessionStore.saveLastPosCat(pair.posId);
+      final recent = await SessionStore.loadRecentPosCats();
+      if (!mounted) return;
+      setState(() => _recentCats = recent);
       final exp = _expiry == null ? null : _ymd(_expiry!);
       if (exp != null) await SessionStore.saveExpiry(vid, exp);
       BatchStore.instance.add(
@@ -261,10 +279,29 @@ class _AddItemScreenState extends State<AddItemScreen> {
     }
   }
 
-  String _catLabel() {
-    if (_catId == null) return '';
-    final pos = _cats.where((c) => c.id == _catId);
-    return pos.isEmpty ? '' : pos.first.name;
+  /// One-tap chips for recently used categories (stale Odoo IDs filtered).
+  Widget _recentChips() {
+    final byId = <int, PosCategory>{for (final c in _cats) c.id: c};
+    final recents = [
+      for (final id in _recentCats)
+        if (byId.containsKey(id)) byId[id]!
+    ];
+    if (recents.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final c in recents)
+            ChoiceChip(
+              label: Text(c.name),
+              selected: c.id == _catId,
+              onSelected: (_) => setState(() => _catId = c.id),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -331,6 +368,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
             controller: _name,
             decoration: const InputDecoration(
                 labelText: 'Name *', border: OutlineInputBorder()),
+            // Refresh keyword ranking in the picker as the name is typed.
+            onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 8),
           TextField(
@@ -339,31 +378,14 @@ class _AddItemScreenState extends State<AddItemScreen> {
                 labelText: 'SKU', border: OutlineInputBorder()),
           ),
           const SizedBox(height: 8),
+          _recentChips(),
           _catsLoading
               ? const LinearProgressIndicator()
-              : Autocomplete<PosCategory>(
-                  displayStringForOption: (c) => c.name,
-                  optionsBuilder: (t) => CategoryMap.filter(_cats, t.text),
-                  onSelected: (c) => setState(() => _catId = c.id),
-                  fieldViewBuilder: (ctx, ctl, focus, onSubmit) {
-                    if (ctl.text.isEmpty && _catId != null) {
-                      ctl.text = _catLabel();
-                    }
-                    return TextField(
-                      controller: ctl,
-                      focusNode: focus,
-                      decoration: const InputDecoration(
-                          labelText: 'Category * (type to filter)',
-                          border: OutlineInputBorder()),
-                      onChanged: (_) {
-                        final m = _cats.where((c) =>
-                            c.name.toLowerCase() ==
-                            ctl.text.trim().toLowerCase());
-                        setState(
-                            () => _catId = m.isEmpty ? null : m.first.id);
-                      },
-                    );
-                  },
+              : CategoryPickerField(
+                  categories: _cats,
+                  selectedId: _catId,
+                  productName: _name.text,
+                  onSelected: (id) => setState(() => _catId = id),
                 ),
           if (_catId != null && pair == null)
             const Padding(

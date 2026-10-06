@@ -13,6 +13,7 @@ import '../price_guard.dart';
 import '../print/label_model.dart';
 import '../print/printer_service.dart';
 import '../session_store.dart';
+import '../widgets/category_picker.dart';
 import 'scan.dart';
 import 'scan_sheet.dart';
 
@@ -78,6 +79,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   List<PosCategory> _cats = [];
   List<PosCategory> _internalCats = [];
   int? _catId;
+  List<int> _recentCats = [];
   bool _catsLoading = false;
 
   CategoryPair? get _pair {
@@ -149,10 +151,12 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         internal = await widget.client.getProductCategories();
       } catch (_) {}
       final last = await SessionStore.loadLastPosCat();
+      final recent = await SessionStore.loadRecentPosCats();
       if (!mounted) return;
       setState(() {
         _cats = cats;
         _internalCats = internal;
+        _recentCats = recent;
         if (last != null && cats.any((c) => c.id == last)) {
           _catId = last;
         } else if (cats.isNotEmpty) {
@@ -267,6 +271,31 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     if (_catId == null) return '';
     final pos = _cats.where((c) => c.id == _catId);
     return pos.isEmpty ? '' : pos.first.name;
+  }
+
+  /// One-tap chips for recently used categories (stale Odoo IDs filtered).
+  Widget _recentChips() {
+    final byId = <int, PosCategory>{for (final c in _cats) c.id: c};
+    final recents = [
+      for (final id in _recentCats)
+        if (byId.containsKey(id)) byId[id]!
+    ];
+    if (recents.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final c in recents)
+            ChoiceChip(
+              label: Text(c.name),
+              selected: c.id == _catId,
+              onSelected: (_) => setState(() => _catId = c.id),
+            ),
+        ],
+      ),
+    );
   }
 
   /// Shared validation + price-guard for the found card.
@@ -461,6 +490,54 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
+  /// Archive with a mandatory name confirm: deactivates the template in
+  /// Odoo (reversible via the Archived filter). Used for duplicates / bad
+  /// items, e.g. a product created on the wrong barcode.
+  Future<void> _confirmArchive(InventoryProduct p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Archive product?'),
+        content: Text(
+            '${p.name}\nBarcode: ${p.barcode.isEmpty ? '—' : p.barcode}\n\nIt will disappear from POS and scans. You can restore it in Odoo (Archived filter).'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Archive')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    try {
+      await widget.client.archiveProduct(p);
+      _audit('archive', p, 'active', 'true', 'false', 'in-app cleanup');
+      if (_duplicates.any((d) => d.variantId == p.variantId)) {
+        setState(() =>
+            _duplicates.removeWhere((d) => d.variantId == p.variantId));
+      }
+      if (_found?.variantId == p.variantId) {
+        _afterSave('Archived ${p.name}');
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Archived ${p.name}')));
+        setState(() => _busy = false);
+      }
+    } on OdooException catch (e) {
+      if (mounted) setState(() => _err = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _err = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   /// Receive + : single Update button (details + optional stock add).
   Future<void> _updateItem() async {
     final p = _found;
@@ -636,6 +713,22 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _err = null;
     });
     try {
+      // Barcode collision: never create a second product on a used barcode
+      // (matches barcode OR SKU, same as lookup). Open it instead.
+      final clash = await widget.client.findVariants(code);
+      if (clash.isNotEmpty) {
+        if (!mounted) return;
+        if (clash.length == 1) {
+          _fillFound(clash.first);
+        } else {
+          setState(() => _duplicates = clash);
+        }
+        if (mounted) {
+          setState(() => _err =
+              'Barcode already used by ${clash.first.name} — opened it instead.');
+        }
+        return;
+      }
       final vid = await widget.client.createProduct(
         name: name,
         barcode: code,
@@ -649,6 +742,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         purchaseOk: _newPurchaseOk,
       );
       await SessionStore.saveLastPosCat(pair.posId);
+      final recent = await SessionStore.loadRecentPosCats();
+      if (!mounted) return;
+      setState(() => _recentCats = recent);
       BatchStore.instance.add(
           barcode: code, name: name, price: price, defaultCode: sku);
       AuditLog.instance.add(AuditEntry(
@@ -846,7 +942,19 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   title: Text(d.name),
                   subtitle: Text(
                       'SKU: ${d.defaultCode.isEmpty ? '—' : d.defaultCode} • On-hand: ${d.qtyAvailable.toStringAsFixed(0)}'),
-                  trailing: const Icon(Icons.chevron_right),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Archive ${d.name}',
+                        icon: const Icon(Icons.archive_outlined,
+                            color: Colors.red),
+                        onPressed:
+                            _busy ? null : () => _confirmArchive(d),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
                   onTap: () => _fillFound(d),
                 )),
           ],
@@ -979,6 +1087,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 onPressed: _busy ? null : () => _printLabel(p),
               ),
             ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: const Icon(Icons.archive_outlined,
+                    color: Colors.red, size: 18),
+                label: const Text('Archive product',
+                    style: TextStyle(color: Colors.red)),
+                onPressed: _busy ? null : () => _confirmArchive(p),
+              ),
+            ),
           ],
         ),
       ),
@@ -1002,6 +1120,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               controller: _newName,
               decoration: const InputDecoration(
                   labelText: 'Name *', border: OutlineInputBorder()),
+              // Refresh keyword ranking in the picker as the name is typed.
+              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 8),
             TextField(
@@ -1010,33 +1130,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                   labelText: 'SKU', border: OutlineInputBorder()),
             ),
             const SizedBox(height: 8),
+            _recentChips(),
             _catsLoading
                 ? const LinearProgressIndicator()
-                : Autocomplete<PosCategory>(
-                    displayStringForOption: (c) => c.name,
-                    optionsBuilder: (t) =>
-                        CategoryMap.filter(_cats, t.text),
-                    onSelected: (c) => setState(() => _catId = c.id),
-                    fieldViewBuilder:
-                        (ctx, ctl, focus, onSubmit) {
-                      if (ctl.text.isEmpty && _catId != null) {
-                        ctl.text = _catLabel();
-                      }
-                      return TextField(
-                        controller: ctl,
-                        focusNode: focus,
-                        decoration: const InputDecoration(
-                            labelText: 'Category * (type to filter)',
-                            border: OutlineInputBorder()),
-                        onChanged: (_) {
-                          final m = _cats.where((c) =>
-                              c.name.toLowerCase() ==
-                              ctl.text.trim().toLowerCase());
-                          setState(() =>
-                              _catId = m.isEmpty ? null : m.first.id);
-                        },
-                      );
-                    },
+                : CategoryPickerField(
+                    categories: _cats,
+                    selectedId: _catId,
+                    productName: _newName.text,
+                    onSelected: (id) => setState(() => _catId = id),
                   ),
             if (_catId != null && pair == null)
               const Padding(

@@ -101,6 +101,41 @@ class _ScanSheetState extends State<ScanSheet> {
     }
   }
 
+  Future<void> _retryCamera() async {
+    try {
+      await _controller.start();
+    } catch (_) {
+      // Failures surface via errorBuilder; nothing to do here.
+    }
+  }
+
+  Widget _errorFallback(BuildContext context, MobileScannerException error) {
+    final denied = error.errorCode == MobileScannerErrorCode.permissionDenied;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.videocam_off, size: 40),
+            const SizedBox(height: 8),
+            Text(
+              denied
+                  ? 'Camera permission denied — allow it in Settings, or type the barcode below.'
+                  : 'Camera failed to start (${error.errorCode.message}). Retry, or type the barcode below.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: _retryCamera,
+              child: const Text('Retry camera'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _load(String code) async {
     setState(() {
       _busy = true;
@@ -277,6 +312,7 @@ class _ScanSheetState extends State<ScanSheet> {
             child: MobileScanner(
               controller: _controller,
               onDetect: _onDetect,
+              errorBuilder: _errorFallback,
             ),
           ),
           Padding(
