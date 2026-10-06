@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../odoo_client.dart';
 import '../session_store.dart';
+import 'add_item.dart';
 import 'receive.dart';
 import 'scan.dart';
 
@@ -193,12 +194,23 @@ class _BrowseScreenState extends State<BrowseScreen> {
                 Expanded(
                   child: TextField(
                     controller: _search,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Search name, barcode, or SKU',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.search),
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _search.text.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear',
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                setState(() => _search.clear());
+                                _refresh();
+                              },
+                            ),
                     ),
                     textInputAction: TextInputAction.search,
+                    onChanged: (_) => setState(() {}),
                     onSubmitted: (_) => _refresh(),
                   ),
                 ),
@@ -240,7 +252,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
             ),
           Expanded(
             child: _rows.isEmpty && !_busy
-                ? const Center(child: Text('No items found.'))
+                ? _emptyState()
                 : ListView.builder(
                     itemCount: _rows.length + (_more ? 1 : 0),
                     itemBuilder: (_, i) {
@@ -278,6 +290,54 @@ class _BrowseScreenState extends State<BrowseScreen> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Dead-end killer: nothing found → offer to create it, carrying the
+  /// search text over (barcode-like → barcode field, else name field).
+  Widget _emptyState() {
+    final q = _search.text.trim();
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_off, size: 48, color: Colors.grey),
+            const SizedBox(height: 8),
+            const Text('No items found.',
+                style: TextStyle(fontSize: 18)),
+            if (q.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('Nothing matches "$q".',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.grey)),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 52,
+                width: double.infinity,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add as new item',
+                      style: TextStyle(fontSize: 16)),
+                  onPressed: () {
+                    final looksBarcode =
+                        !q.contains(' ') && q.length <= 32;
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => AddItemScreen(
+                        client: widget.client,
+                        user: widget.user,
+                        initialBarcode: looksBarcode ? q : '',
+                        initialName: looksBarcode ? '' : q,
+                      ),
+                    ));
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

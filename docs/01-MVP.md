@@ -38,7 +38,8 @@ If it’s not needed to receive a box today, it’s out.
      `inventory_quantity = counted` directly (new `setStock`, not `addStock`).
      Blank qty + `Adjust price` = prices-only fix, no stock write.
    * **Not found (both modes):** form prefilled locked `barcode=<scan>`:
-     `name* (≥2 chars), Category* (default = last pair), cost, price, qty,
+     `name* (≥2 chars), Category* (default = last pair), cost (optional),
+     price, qty,
      SKU (auto-suggest = scan if numeric)`, sellable/purchasable toggles
      (default ON, inside collapsed Details). `Create & next` creates
      `product.template` (`available_in_pos=True, sale_ok=True,
@@ -116,3 +117,9 @@ If it’s not needed to receive a box today, it’s out.
 2. Draft receipt + single Validate + idempotency (kill per-scan writes) + `cloud9_inventory_api` facade (per TECH-STRATEGY v2).
 3. `product.packaging` for cases + barcode DB index.
 4. Blind count + sessions + variance report (P2), then HID scanner, then counts, then lottery model, then iOS.
+5. P1 AI assist (deferred, provider-neutral by design): on Add, "Suggest with AI"
+   fills category + North-Jersey retail price from name/barcode; user always
+   confirms before save. Configured via --dart-define only, never in git:
+   AI_API_KEY + AI_API_BASE_URL + AI_API_MODEL (any OpenAI-compatible
+   endpoint — OpenRouter today, swappable tomorrow). Feature hides when
+   unconfigured; responses cached per barcode; offline/MVP flow unchanged.

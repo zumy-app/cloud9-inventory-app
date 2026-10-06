@@ -114,6 +114,31 @@ void main() {
     expect(p.tracksStock, isTrue);
   });
 
+  test('archiveVariant deactivates the variant only', () async {
+    String? lastBody;
+    final mock = MockClient((req) async {
+      lastBody = req.body;
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    const p = InventoryProduct(
+      variantId: 7,
+      tmplId: 42,
+      name: 'n',
+      barcode: 'b',
+      defaultCode: '',
+      listPrice: 1,
+      standardPrice: 1,
+      qtyAvailable: 0,
+      posCategId: null,
+    );
+    await client.archiveVariant(p);
+    expect(lastBody, contains('product.product'));
+    expect(lastBody, contains('[7]'));
+    expect(lastBody, contains('"active":false'));
+  });
+
   test('audit log caps at 200 entries', () {
     final log = AuditLog.instance;
     log.clear();

@@ -449,6 +449,29 @@ class OdooClient {
     ]);
   }
 
+  /// Archive a duplicate variant (reversible; template untouched).
+  /// Used by the in-app merge flow — never deletes.
+  Future<void> archiveVariant(InventoryProduct p) async {
+    await callKw('product.product', 'write', [
+      [p.variantId],
+      {'active': false},
+    ]);
+  }
+
+  /// Update template internal + POS categories together.
+  Future<void> updateCategory(
+      InventoryProduct p, int internalId, int posId) async {
+    await callKw('product.template', 'write', [
+      [p.tmplId],
+      {
+        'categ_id': internalId,
+        'pos_categ_ids': [
+          [6, 0, [posId]]
+        ],
+      },
+    ]);
+  }
+
   Future<double> _writeQuant(InventoryProduct p, double target) async {
     final found = await callKw('stock.quant', 'search_read', [], kwargs: {
       'domain': [

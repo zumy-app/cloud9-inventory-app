@@ -1,3 +1,7 @@
+# Local secrets — NEVER commit (AI keys, signing passwords, per-dev config).
+.env
+*.env.local
+
 # Miscellaneous
 *.class
 *.log

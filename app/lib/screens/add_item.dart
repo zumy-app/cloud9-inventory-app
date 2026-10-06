@@ -17,7 +17,14 @@ import 'scan.dart';
 class AddItemScreen extends StatefulWidget {
   final OdooClient client;
   final String user;
-  const AddItemScreen({super.key, required this.client, required this.user});
+  final String initialBarcode;
+  final String initialName;
+  const AddItemScreen(
+      {super.key,
+      required this.client,
+      required this.user,
+      this.initialBarcode = '',
+      this.initialName = ''});
 
   @override
   State<AddItemScreen> createState() => _AddItemScreenState();
@@ -54,6 +61,12 @@ class _AddItemScreenState extends State<AddItemScreen> {
   void initState() {
     super.initState();
     _loadCats();
+    if (widget.initialBarcode.trim().isNotEmpty) {
+      _barcode.text = widget.initialBarcode.trim();
+    }
+    if (widget.initialName.trim().isNotEmpty) {
+      _name.text = widget.initialName.trim();
+    }
     SessionStore.loadContinuous().then((v) {
       if (mounted) setState(() => _continuous = v);
     });
@@ -152,7 +165,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
     final code = _barcode.text.trim();
     final name = _name.text.trim();
     final sku = _sku.text.trim();
-    final cost = _num(_cost.text);
+    final cost =
+        _cost.text.trim().isEmpty ? 0.0 : _num(_cost.text);
     final price = _num(_price.text);
     final qty = _num(_qty.text);
     if (name.length < 2) {
@@ -164,7 +178,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
       return;
     }
     if (cost.isNaN || price.isNaN || qty.isNaN || cost < 0 || price < 0 || qty < 0) {
-      setState(() => _err = 'Enter valid cost, price and qty (≥ 0).');
+      setState(() => _err = 'Enter valid price and qty (≥ 0). Cost is optional.');
       return;
     }
     String reason = '';
@@ -352,8 +366,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
                   controller: _cost,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                      labelText: 'Cost', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                        labelText: 'Cost (optional)', border: OutlineInputBorder()),
                 ),
               ),
               const SizedBox(width: 8),

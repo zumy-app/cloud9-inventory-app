@@ -398,12 +398,13 @@ class _ScanSheetState extends State<ScanSheet> {
                             alignment: Alignment.centerLeft,
                             child: TextButton(
                               onPressed: () {
+                                final messenger =
+                                    ScaffoldMessenger.of(context);
                                 setState(() => _textDirty = true);
                                 Navigator.of(context).pop();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text(
-                                            'Price/detail edits: use single mode')));
+                                messenger.showSnackBar(const SnackBar(
+                                    content: Text(
+                                        'Price/detail edits: use single mode')));
                               },
                               child: const Text(
                                   'Edit price/details (single mode)'),

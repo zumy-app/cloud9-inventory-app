@@ -54,7 +54,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   bool _quantBlocked = false;
   Future<void> Function()? _retrySave;
   bool _converting = false;
+  DateTime? _expiry;
+  String? _expiryOrig;
 
+  bool _merging = false;
+  int? _keeperId;
   bool _isQuantBlocked(String msg) =>
       msg.contains('Quants') || msg.contains('refuses stock');
 
@@ -63,6 +67,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _retrySave = null;
     _reasonRequired = false;
     _skuOverride = false;
+    _merging = false;
+    _keeperId = null;
   }
 
   // new-product form
@@ -227,12 +233,42 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     _price.text = p.listPrice.toStringAsFixed(2);
     _qty.text = _isCount ? '' : '1';
     _reason.clear();
+    _expiry = null;
+    _expiryOrig = null;
+    // Preselect the product's own POS category when known.
+    if (p.posCategId != null &&
+        _cats.any((c) => c.id == p.posCategId)) {
+      _catId = p.posCategId;
+    }
     _resetSaveState();
     setState(() {
       _found = p;
       _duplicates = [];
       _showPriceAdjust = false;
     });
+    SessionStore.loadExpiry(p.variantId).then((e) {
+      if (!mounted || _found?.variantId != p.variantId) return;
+      if (e != null && e.trim().isNotEmpty) {
+        setState(() {
+          _expiry = DateTime.tryParse(e.trim());
+          _expiryOrig = e.trim();
+        });
+      }
+    });
+  }
+
+  String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> _pickFoundExpiry() async {
+    final now = DateTime.now();
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _expiry ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 10),
+    );
+    if (d != null && mounted) setState(() => _expiry = d);
   }
 
   double _num(String s) => double.tryParse(s.trim()) ?? double.nan;
@@ -321,6 +357,27 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _audit('receive', p, 'standard_price', oldCost.toStringAsFixed(2),
           cost.toStringAsFixed(2), reason);
     }
+    final pair = _pair;
+    if (pair != null && p.posCategId != pair.posId) {
+      await widget.client.updateCategory(p, pair.internalId, pair.posId);
+      await SessionStore.saveLastPosCat(pair.posId);
+      _audit('receive', p, 'category', _catNameOf(p.posCategId),
+          pair.posName, reason);
+    }
+    if (_expiry != null) {
+      final ymd = _ymd(_expiry!);
+      if (ymd != _expiryOrig) {
+        await SessionStore.saveExpiry(p.variantId, ymd);
+        _audit('receive', p, 'expiry', _expiryOrig ?? '—', ymd, reason);
+        _expiryOrig = ymd;
+      }
+    }
+  }
+
+  String _catNameOf(int? id) {
+    if (id == null) return '—';
+    final m = _cats.where((c) => c.id == id);
+    return m.isEmpty ? '—' : m.first.name;
   }
 
   void _afterSave(String toast) {
@@ -584,7 +641,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final code = _barcode.text.trim();
     final name = _newName.text.trim();
     final sku = _newSku.text.trim();
-    final cost = _num(_newCost.text);
+    final cost =
+        _newCost.text.trim().isEmpty ? 0.0 : _num(_newCost.text);
     final price = _num(_newPrice.text);
     final qty = _num(_newQty.text);
     if (name.length < 2) {
@@ -601,7 +659,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       return;
     }
     if (cost.isNaN || price.isNaN || qty.isNaN || cost < 0 || price < 0 || qty < 0) {
-      setState(() => _err = 'Enter valid cost, price and qty (≥ 0).');
+      setState(() => _err = 'Enter valid price and qty (≥ 0). Cost is optional.');
       return;
     }
     String reason = '';
@@ -709,13 +767,6 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_isCount ? 'Update count' : 'Receive delivery'),
-        actions: [
-          IconButton(
-            tooltip: 'Rapid scan',
-            icon: const Icon(Icons.burst_mode),
-            onPressed: _busy ? null : _openContinuous,
-          ),
-        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -726,6 +777,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               icon: const Icon(Icons.qr_code_scanner, size: 28),
               label: const Text('Scan', style: TextStyle(fontSize: 20)),
               onPressed: _busy ? null : _scan,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 52,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.burst_mode),
+              label: const Text('Rapid scan — stays open',
+                  style: TextStyle(fontSize: 16)),
+              onPressed: _busy ? null : _openContinuous,
             ),
           ),
           const SizedBox(height: 12),
@@ -801,6 +862,15 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     );
   }
 
+  Widget _keeperTile(InventoryProduct d) {
+    return RadioListTile<int>(
+      value: d.variantId,
+      title: Text(d.name),
+      subtitle: Text(
+          'SKU: ${d.defaultCode.isEmpty ? '—' : d.defaultCode} • On-hand: ${d.qtyAvailable.toStringAsFixed(0)}'),
+    );
+  }
+
   Widget _duplicateCard() {
     return Card(
       color: Colors.orange.shade50,
@@ -811,20 +881,129 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           children: [
             const Text('Duplicate barcode — pick the right item',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Text(
-                'Saving is blocked until you choose. Stock must land on the right variant.'),
+            Text(_merging
+                ? 'Choose the record to keep. Stock is summed into it; the others are archived (reversible, never deleted).'
+                : 'Saving is blocked until you choose. Stock must land on the right variant.'),
             const SizedBox(height: 8),
-            ..._duplicates.map((d) => ListTile(
-                  title: Text(d.name),
-                  subtitle: Text(
-                      'SKU: ${d.defaultCode.isEmpty ? '—' : d.defaultCode} • On-hand: ${d.qtyAvailable.toStringAsFixed(0)}'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _fillFound(d),
-                )),
+            if (_merging)
+              RadioGroup<int>(
+                groupValue: _keeperId,
+                onChanged: (v) => setState(() => _keeperId = v),
+                child: Column(
+                  children: _duplicates.map(_keeperTile).toList(),
+                ),
+              )
+            else
+              ..._duplicates.map((d) => ListTile(
+                    title: Text(d.name),
+                    subtitle: Text(
+                        'SKU: ${d.defaultCode.isEmpty ? '—' : d.defaultCode} • On-hand: ${d.qtyAvailable.toStringAsFixed(0)}'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _fillFound(d),
+                  )),
+            const SizedBox(height: 8),
+            if (!_merging)
+              OutlinedButton.icon(
+                icon: const Icon(Icons.merge),
+                label: const Text('Merge duplicates…'),
+                onPressed: _busy
+                    ? null
+                    : () => setState(() {
+                          _merging = true;
+                          _keeperId = _duplicates.first.variantId;
+                        }),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() {
+                                _merging = false;
+                                _keeperId = null;
+                              }),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed:
+                          (_busy || _keeperId == null) ? null : _mergeDuplicates,
+                      child: const Text('Merge'),
+                    ),
+                  ),
+                ],
+              ),
           ],
         ),
       ),
     );
+  }
+
+  /// Merge duplicate variants: sum stock into the keeper, archive the rest.
+  Future<void> _mergeDuplicates() async {
+    final keeperId = _keeperId;
+    if (keeperId == null || _busy) return;
+    final keeper = _duplicates.firstWhere((d) => d.variantId == keeperId);
+    final others =
+        _duplicates.where((d) => d.variantId != keeperId).toList();
+    final total = _duplicates.fold<double>(
+        0, (a, d) => a + d.qtyAvailable);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirm merge'),
+        content: Text(
+            'Keep: ${keeper.name}\nStock: ${keeper.qtyAvailable.toStringAsFixed(0)} → ${total.toStringAsFixed(0)}\nArchive ${others.length} duplicate(s). Nothing is deleted.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Merge')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    try {
+      if (!keeper.tracksStock) {
+        await widget.client.setStorable(keeper);
+      }
+      await widget.client.setStock(keeper.asStorable(), total);
+      _audit('receive', keeper, 'qty',
+          keeper.qtyAvailable.toStringAsFixed(0), total.toStringAsFixed(0),
+          'merge ${others.length} duplicate(s)');
+      for (final o in others) {
+        await widget.client.archiveVariant(o);
+        _audit('receive', o, 'active', 'true', 'false',
+            'merged into ${keeper.name}');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Merged ${others.length} into ${keeper.name} (qty → ${total.toStringAsFixed(0)})')));
+      setState(() {
+        _barcode.clear();
+        _duplicates = [];
+        _found = null;
+      });
+      _resetSaveState();
+      if (mounted) setState(() {});
+    } on OdooException catch (e) {
+      if (mounted) setState(() => _err = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _err = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Widget _foundCard(InventoryProduct p) {
@@ -856,6 +1035,56 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               decoration: const InputDecoration(
                   labelText: 'SKU', border: OutlineInputBorder()),
             ),
+            const SizedBox(height: 8),
+            _catsLoading
+                ? const LinearProgressIndicator()
+                : Autocomplete<PosCategory>(
+                    displayStringForOption: (c) => c.name,
+                    optionsBuilder: (t) =>
+                        CategoryMap.filter(_cats, t.text),
+                    onSelected: (c) => setState(() => _catId = c.id),
+                    fieldViewBuilder: (ctx, ctl, focus, onSubmit) {
+                      if (ctl.text.isEmpty && _catId != null) {
+                        ctl.text = _catLabel();
+                      }
+                      return TextField(
+                        controller: ctl,
+                        focusNode: focus,
+                        decoration: const InputDecoration(
+                            labelText: 'Category (type to filter)',
+                            border: OutlineInputBorder()),
+                        onChanged: (_) {
+                          final m = _cats.where((c) =>
+                              c.name.toLowerCase() ==
+                              ctl.text.trim().toLowerCase());
+                          setState(() =>
+                              _catId = m.isEmpty ? null : m.first.id);
+                        },
+                      );
+                    },
+                  ),
+            if (_catId != null && _pair == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text('Unmapped — pick again.',
+                    style: TextStyle(color: Colors.red)),
+              ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.event),
+              label: Text(_expiry == null
+                  ? 'Expiry date (optional)'
+                  : 'Expires: ${_ymd(_expiry!)}'),
+              onPressed: _busy ? null : _pickFoundExpiry,
+            ),
+            if (_expiry != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => setState(() => _expiry = null),
+                  child: const Text('Clear date'),
+                ),
+              ),
             const SizedBox(height: 8),
             if (!_isCount || _showPriceAdjust) ...[
               TextField(
@@ -1022,7 +1251,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true),
                     decoration: const InputDecoration(
-                        labelText: 'Cost', border: OutlineInputBorder()),
+                        labelText: 'Cost (optional)',
+                        border: OutlineInputBorder()),
                   ),
                 ),
                 const SizedBox(width: 8),

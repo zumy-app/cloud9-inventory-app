@@ -87,4 +87,18 @@ class SessionStore {
     final p = await SharedPreferences.getInstance();
     await p.setString(_expiryKey(variantId), ymd);
   }
+
+  // AI suggestions kill-switch. The AI assist is untested: default OFF,
+  // and every future AI call site must check loadAiEnabled() first.
+  static const _kAiEnabled = 'ai_enabled';
+
+  static Future<bool> loadAiEnabled() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_kAiEnabled) ?? false;
+  }
+
+  static Future<void> saveAiEnabled(bool v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kAiEnabled, v);
+  }
 }

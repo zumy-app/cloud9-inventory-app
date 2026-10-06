@@ -201,6 +201,8 @@ class _AccountTab extends StatelessWidget {
           const SizedBox(height: 8),
           Text('User: ${user.isEmpty ? '—' : user}',
               style: const TextStyle(fontSize: 18)),
+          const SizedBox(height: 8),
+          const _AiToggle(),
           const SizedBox(height: 24),
           SizedBox(
             height: 52,
@@ -218,6 +220,42 @@ class _AccountTab extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// AI suggestions kill-switch. Untested feature: OFF unless the staffer
+/// explicitly enables it. Future AI call sites must check
+/// SessionStore.loadAiEnabled() before doing anything.
+class _AiToggle extends StatefulWidget {
+  const _AiToggle();
+
+  @override
+  State<_AiToggle> createState() => _AiToggleState();
+}
+
+class _AiToggleState extends State<_AiToggle> {
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SessionStore.loadAiEnabled().then((v) {
+      if (mounted) setState(() => _enabled = v);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: const Text('AI suggestions (beta)'),
+      subtitle: const Text('Untested — off unless you enable it'),
+      value: _enabled,
+      onChanged: (v) async {
+        await SessionStore.saveAiEnabled(v);
+        if (mounted) setState(() => _enabled = v);
+      },
     );
   }
 }
