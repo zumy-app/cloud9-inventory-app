@@ -79,10 +79,19 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   bool _catsLoading = false;
 
   CategoryPair? get _pair {
-    if (_catId == null) return null;
+    return CategoryMap.resolveForCreate(
+      posId: _catId,
+      posCats: _cats,
+      internalCats: _internalCats,
+    );
+  }
+
+  bool get _isExactPair {
+    if (_catId == null) return false;
     final pos = _cats.where((c) => c.id == _catId);
-    if (pos.isEmpty) return null;
-    return CategoryMap.resolve(pos: pos.first, internalCats: _internalCats);
+    if (pos.isEmpty) return false;
+    return CategoryMap.resolve(pos: pos.first, internalCats: _internalCats) !=
+        null;
   }
 
   @override
@@ -597,7 +606,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
     final pair = _pair;
     if (pair == null) {
-      setState(() => _err = 'Unmapped — pick again.');
+      setState(() => _err = 'Categories still loading — try again.');
       return;
     }
     if (cost.isNaN || price.isNaN || qty.isNaN || cost < 0 || price < 0 || qty < 0) {
@@ -1003,14 +1012,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             if (_catId != null && pair == null)
               const Padding(
                 padding: EdgeInsets.only(top: 4),
-                child: Text('Unmapped — pick again.',
-                    style: TextStyle(color: Colors.red)),
+                child: Text('Categories still loading…',
+                    style: TextStyle(color: Colors.grey)),
               ),
             if (pair != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                    'Maps to: ${pair.internalName} + POS ${pair.posName}',
+                    _isExactPair
+                        ? 'Maps to: ${pair.internalName} + POS ${pair.posName}'
+                        : 'Maps to: ${pair.internalName} (fallback) + POS ${pair.posName}',
                     style: const TextStyle(color: Colors.grey)),
               ),
             const SizedBox(height: 8),

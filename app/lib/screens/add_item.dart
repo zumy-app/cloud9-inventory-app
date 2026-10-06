@@ -44,10 +44,19 @@ class _AddItemScreenState extends State<AddItemScreen> {
   InventoryProduct? _existing;
 
   CategoryPair? get _pair {
-    if (_catId == null) return null;
+    return CategoryMap.resolveForCreate(
+      posId: _catId,
+      posCats: _cats,
+      internalCats: _internalCats,
+    );
+  }
+
+  bool get _isExactPair {
+    if (_catId == null) return false;
     final pos = _cats.where((c) => c.id == _catId);
-    if (pos.isEmpty) return null;
-    return CategoryMap.resolve(pos: pos.first, internalCats: _internalCats);
+    if (pos.isEmpty) return false;
+    return CategoryMap.resolve(pos: pos.first, internalCats: _internalCats) !=
+        null;
   }
 
   @override
@@ -160,7 +169,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
       return;
     }
     if (_catId == null || _pair == null) {
-      setState(() => _err = 'Pick a mapped category (Unmapped — pick again).');
+      setState(() => _err = 'Pick a category (still loading — try again).');
       return;
     }
     if (cost.isNaN || price.isNaN || qty.isNaN || cost < 0 || price < 0 || qty < 0) {
@@ -341,8 +350,17 @@ class _AddItemScreenState extends State<AddItemScreen> {
           if (_catId != null && pair == null)
             const Padding(
               padding: EdgeInsets.only(top: 4),
-              child: Text('Unmapped — pick again.',
-                  style: TextStyle(color: Colors.red)),
+              child: Text('Categories still loading…',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+          if (pair != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                  _isExactPair
+                      ? 'Maps to: ${pair.internalName} + POS ${pair.posName}'
+                      : 'Maps to: ${pair.internalName} (fallback) + POS ${pair.posName}',
+                  style: const TextStyle(color: Colors.grey)),
             ),
           const SizedBox(height: 8),
           Row(
