@@ -55,3 +55,7 @@ app.*.map.json
 key.properties
 *.keystore
 *.jks
+
+# Local AI/dev secrets — NEVER commit (AI_API_KEY etc.).
+.env
+*.env.local
