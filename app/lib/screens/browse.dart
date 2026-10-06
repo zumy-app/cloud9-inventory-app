@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../odoo_client.dart';
+import '../print/label_model.dart';
+import '../print/printer_service.dart';
 import '../session_store.dart';
 import 'receive.dart';
 import 'scan.dart';
@@ -140,6 +142,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
   Future<void> _showDetail(InventoryProduct p) async {
     final expiry = await SessionStore.loadExpiry(p.variantId);
     if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
     showModalBottomSheet(
       context: context,
       builder: (_) => Padding(
@@ -163,6 +166,24 @@ class _BrowseScreenState extends State<BrowseScreen> {
                 'Category: ${_catName(p.posCategId).isEmpty ? '—' : _catName(p.posCategId)}'),
             Text('Expires: ${expiry ?? '—'}'),
             const SizedBox(height: 12),
+            SizedBox(
+              height: 52,
+              child: FilledButton.icon(
+                icon: const Icon(Icons.print),
+                label: const Text('Print label'),
+                onPressed: () async {
+                  try {
+                    await PrinterService.instance.printLabel(
+                      LabelModel.fromProduct(p),
+                    );
+                    messenger.showSnackBar(SnackBar(
+                        content: Text('Label sent for ${p.name}')));
+                  } catch (e) {
+                    messenger.showSnackBar(SnackBar(content: Text('$e')));
+                  }
+                },
+              ),
+            ),
           ],
         ),
       ),

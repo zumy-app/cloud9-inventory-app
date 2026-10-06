@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../batch_store.dart';
+import '../print/label_model.dart';
+import '../print/printer_service.dart';
 
 class BatchScreen extends StatefulWidget {
   const BatchScreen({super.key});
@@ -39,6 +41,27 @@ class _BatchScreenState extends State<BatchScreen> {
         content: Text('Shared TSV — run gen-label-pngs.js on the PC')));
   }
 
+  Future<void> _printAll() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final models = BatchStore.instance.lines
+        .map((l) => LabelModel(
+              name: l.name,
+              price: l.price,
+              barcode: l.barcode,
+              defaultCode: l.defaultCode,
+              category: l.category,
+              copies: l.copies,
+            ))
+        .toList();
+    try {
+      await PrinterService.instance.printLabels(models);
+      messenger.showSnackBar(SnackBar(
+          content: Text('Printed ${models.length} label(s)')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final lines = BatchStore.instance.lines;
@@ -46,6 +69,12 @@ class _BatchScreenState extends State<BatchScreen> {
       appBar: AppBar(
         title: Text('Labels (${BatchStore.instance.totalCopies})'),
         actions: [
+          if (lines.isNotEmpty)
+            IconButton(
+              tooltip: 'Print all labels',
+              icon: const Icon(Icons.print),
+              onPressed: _printAll,
+            ),
           if (lines.isNotEmpty)
             TextButton(
               onPressed: () => BatchStore.instance.clear(),

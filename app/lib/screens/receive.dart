@@ -10,6 +10,8 @@ import '../batch_store.dart';
 import '../category_map.dart';
 import '../odoo_client.dart';
 import '../price_guard.dart';
+import '../print/label_model.dart';
+import '../print/printer_service.dart';
 import '../session_store.dart';
 import 'scan.dart';
 import 'scan_sheet.dart';
@@ -676,6 +678,23 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
   }
 
+  /// Print one label for the current card via the paired printer.
+  /// Unconfigured transport surfaces as a pairing prompt, never a crash.
+  Future<void> _printLabel(InventoryProduct p) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final price = _num(_price.text);
+      await PrinterService.instance.printLabel(
+        LabelModel.fromProduct(p,
+            priceOverride: price.isNaN ? null : price),
+      );
+      messenger.showSnackBar(
+          SnackBar(content: Text('Label sent for ${p.name}')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   Future<String?> _askReason(String why) async {
     final c = TextEditingController();
     final r = await showDialog<String>(
@@ -950,6 +969,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                       style: TextStyle(fontSize: 18)),
                 ),
               ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 52,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.print),
+                label: const Text('Print label',
+                    style: TextStyle(fontSize: 16)),
+                onPressed: _busy ? null : () => _printLabel(p),
+              ),
+            ),
           ],
         ),
       ),

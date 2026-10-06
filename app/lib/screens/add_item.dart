@@ -10,6 +10,8 @@ import '../audit_log.dart';
 import '../batch_store.dart';
 import '../category_map.dart';
 import '../odoo_client.dart';
+import '../print/label_model.dart';
+import '../print/printer_service.dart';
 import '../session_store.dart';
 import 'receive.dart';
 import 'scan.dart';
@@ -224,8 +226,24 @@ class _AddItemScreenState extends State<AddItemScreen> {
         reason: reason,
       ));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Added $name (0 → $qty)')));
+      final messenger = ScaffoldMessenger.of(context);
+      final created = LabelModel(
+          name: name, price: price, barcode: code, defaultCode: sku);
+      messenger.showSnackBar(SnackBar(
+        content: Text('Added $name (0 → $qty)'),
+        action: SnackBarAction(
+          label: 'Print',
+          onPressed: () async {
+            try {
+              await PrinterService.instance.printLabel(created);
+              messenger.showSnackBar(
+                  SnackBar(content: Text('Label sent for $name')));
+            } catch (e) {
+              messenger.showSnackBar(SnackBar(content: Text('$e')));
+            }
+          },
+        ),
+      ));
       setState(() {
         _barcode.clear();
         _name.clear();
