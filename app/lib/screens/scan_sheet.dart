@@ -1,6 +1,8 @@
 // Continuous scan sheet: stays open, rapid qty capture.
-// Qty auto-saves; touched price/SKU/category text never auto-persists —
-// scanning away with dirty text prompts Save / Discard first.
+// Receive: qty auto-saves on scan-away. Count: every write needs the
+// before → after confirm first — no silent absolute writes.
+// Every outcome ends in the result banner (success green, failure red);
+// touched price/SKU/category text never auto-persists.
 library;
 
 import 'package:flutter/material.dart';
@@ -51,6 +53,20 @@ class _ScanSheetState extends State<ScanSheet> {
   int _scans = 0;
   String _lastCode = '';
   DateTime _lastTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Last save outcome, shown as a persistent banner so every workflow ends
+  // with visible success/failure feedback (not just a beep + counter).
+  String? _lastResult;
+  bool _lastOk = true;
+
+  void _say(String msg, {bool ok = true}) {
+    if (!mounted) return;
+    setState(() {
+      _lastResult = msg;
+      _lastOk = ok;
+      _err = null;
+    });
+  }
 
   InventoryProduct? _pending;
   bool _textDirty = false;
@@ -195,15 +211,41 @@ class _ScanSheetState extends State<ScanSheet> {
         _pending = null;
         _qty.text = '1';
       });
+      _say('Saved ${p.name} +1 → ${after.toStringAsFixed(0)}');
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      _say(e.message, ok: false);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  /// Before → after confirm for continuous counts (same rule as single
+  /// mode). Factored out so no BuildContext crosses an async gap.
+  Future<bool> _confirmCount(InventoryProduct p, double qty) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirm count'),
+        content: Text(
+            '${p.name}\n${p.qtyAvailable.toStringAsFixed(0)} → ${qty.toStringAsFixed(0)}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Confirm')),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   /// Save pending qty (qty only — never text fields) before moving on.
-  /// Returns false when blocked by a dirty-text prompt the user cancelled.
+  /// Count mode always shows the before → after confirm first (same rule as
+  /// single mode) — no silent absolute writes. Every outcome ends in the
+  /// result banner. Returns false when blocked/cancelled: the caller must
+  /// stay on the pending item.
   Future<bool> _ensurePendingSaved() async {
     final p = _pending;
     if (p == null) return true;
@@ -231,19 +273,27 @@ class _ScanSheetState extends State<ScanSheet> {
       if (mounted) setState(() => _textDirty = false);
     }
     final qty = double.tryParse(_qty.text.trim()) ?? double.nan;
-    if (qty.isNaN || qty < 1) {
-      if (mounted) {
-        setState(() => _err = 'Pending ${_pending!.name} has invalid qty — fix or clear it.');
-      }
+    // Count is absolute (0 allowed, like single mode); receive adds (≥ 1).
+    final minQty = _isCount ? 0.0 : 1.0;
+    if (qty.isNaN || qty < minQty) {
+      _say(_isCount
+          ? 'Pending ${p.name} has invalid qty — enter 0 or more.'
+          : 'Pending ${p.name} has invalid qty — fix or clear it.');
       return false;
+    }
+    if (_isCount) {
+      final confirmed = await _confirmCount(p, qty);
+      if (!confirmed || !mounted) return false;
     }
     setState(() => _busy = true);
     try {
+      final before = p.qtyAvailable;
       final after = _isCount
           ? await widget.client.setStock(p, qty)
           : await widget.client.addStock(p, qty);
-      _audit(p, 'qty', p.qtyAvailable.toStringAsFixed(0),
-          after.toStringAsFixed(0), 'continuous');
+      _audit(p, 'qty', before.toStringAsFixed(0), after.toStringAsFixed(0),
+          'continuous');
+      _beep();
       if (!mounted) return false;
       setState(() {
         _scans++;
@@ -251,9 +301,19 @@ class _ScanSheetState extends State<ScanSheet> {
         _qty.text = '1';
         _textDirty = false;
       });
+      _say(_isCount
+          ? 'Counted ${p.name}: ${before.toStringAsFixed(0)} → ${after.toStringAsFixed(0)}'
+          : 'Saved ${p.name} +${qty.toStringAsFixed(0)} → ${after.toStringAsFixed(0)}');
       return true;
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      _say(
+          e.message == 'SESSION_EXPIRED'
+              ? 'Session expired — sign in again.'
+              : e.message,
+          ok: false);
+      return false;
+    } catch (e) {
+      _say(e.toString(), ok: false);
       return false;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -275,10 +335,35 @@ class _ScanSheetState extends State<ScanSheet> {
     ));
   }
 
+  /// Leaving with a pending item ends the workflow with an explicit
+  /// choice — save (with the count confirm when in count mode), discard,
+  /// or stay. Nothing is silently dropped.
   Future<void> _exit() async {
-    if (_pending != null && _textDirty) {
-      final ok = await _ensurePendingSaved();
-      if (!ok) return;
+    final p = _pending;
+    if (p != null) {
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Leave continuous?'),
+          content: Text('${p.name} has an unsaved qty.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop('stay'),
+                child: const Text('Stay')),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop('discard'),
+                child: const Text('Discard')),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop('save'),
+                child: const Text('Save & exit')),
+          ],
+        ),
+      );
+      if (choice == null || choice == 'stay' || !mounted) return;
+      if (choice == 'save') {
+        final ok = await _ensurePendingSaved();
+        if (!ok) return;
+      }
     }
     if (mounted) Navigator.of(context).pop();
   }
@@ -293,7 +378,8 @@ class _ScanSheetState extends State<ScanSheet> {
           icon: const Icon(Icons.close),
           onPressed: _exit,
         ),
-        title: Text('Continuous ($_scans)'),
+        title: Text(
+            '${_isCount ? 'Count' : 'Receive'} continuous ($_scans)'),
         actions: [
           IconButton(
             tooltip: 'Torch',
@@ -340,6 +426,30 @@ class _ScanSheetState extends State<ScanSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(_err!,
                   style: const TextStyle(color: Colors.red)),
+            ),
+          if (_lastResult != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: Card(
+                color: _lastOk
+                    ? Colors.green.shade50
+                    : Colors.red.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _lastOk
+                            ? Icons.check_circle
+                            : Icons.error,
+                        color: _lastOk ? Colors.green : Colors.red,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(_lastResult!)),
+                    ],
+                  ),
+                ),
+              ),
             ),
           if (p != null)
             Expanded(
@@ -412,17 +522,7 @@ class _ScanSheetState extends State<ScanSheet> {
                                 child: OutlinedButton(
                                   onPressed: _busy
                                       ? null
-                                      : () async {
-                                          final messenger =
-                                              ScaffoldMessenger.of(context);
-                                          final ok =
-                                              await _ensurePendingSaved();
-                                          if (ok && mounted) {
-                                            messenger.showSnackBar(SnackBar(
-                                                content: Text(
-                                                    'Saved ${p.name}')));
-                                          }
-                                        },
+                                      : () => _ensurePendingSaved(),
                                   child: Text(_isCount
                                       ? 'Set count'
                                       : 'Save qty'),

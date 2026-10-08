@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../audit_log.dart';
-import '../batch_store.dart';
+import '../label_collections.dart';
 import '../category_map.dart';
 import '../odoo_client.dart';
 import '../price_guard.dart';
@@ -22,12 +22,14 @@ class ReceiveScreen extends StatefulWidget {
   final String user;
   final String initialBarcode;
   final String initialMode; // 'receive' | 'count' | '' (= stored pref)
+  final String initialName; // prefill for the new-product form (Manage add)
   const ReceiveScreen(
       {super.key,
       required this.client,
       this.user = '',
       this.initialBarcode = '',
-      this.initialMode = ''});
+      this.initialMode = '',
+      this.initialName = ''});
 
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
@@ -70,6 +72,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
   // new-product form
   final _newName = TextEditingController();
+  String _nameSeed = ''; // one-shot prefill from Manage (consumed on use)
   final _newSku = TextEditingController();
   final _newCost = TextEditingController();
   final _newPrice = TextEditingController();
@@ -101,6 +104,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   @override
   void initState() {
     super.initState();
+    _nameSeed = widget.initialName.trim();
     _loadPrefs();
     _loadCats();
     if (widget.initialBarcode.trim().isNotEmpty) {
@@ -209,8 +213,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       final rows = await widget.client.findVariants(code);
       if (!mounted) return;
       if (rows.isEmpty) {
+        final seed = _nameSeed;
+        _nameSeed = '';
         setState(() {
-          _newName.text = '';
+          _newName.text = seed;
           _newSku.text = code.length <= 32 ? code : '';
           _newCost.text = '';
           _newPrice.text = '';
@@ -386,7 +392,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _audit('receive', p, 'qty', p.qtyAvailable.toStringAsFixed(0),
           after.toStringAsFixed(0), '');
       if (_addLabel) {
-        BatchStore.instance.add(
+        LabelCollections.instance.addToActive(
           barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
           name: _name.text.trim().isNotEmpty ? _name.text.trim() : p.name,
           price: price,
@@ -429,7 +435,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       _audit('count', p, 'qty', p.qtyAvailable.toStringAsFixed(0),
           after.toStringAsFixed(0), '');
       if (_addLabel) {
-        BatchStore.instance.add(
+        LabelCollections.instance.addToActive(
           barcode: p.barcode.isNotEmpty ? p.barcode : _barcode.text.trim(),
           name: p.name,
           price: price,
@@ -745,7 +751,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       final recent = await SessionStore.loadRecentPosCats();
       if (!mounted) return;
       setState(() => _recentCats = recent);
-      BatchStore.instance.add(
+      LabelCollections.instance.addToActive(
           barcode: code, name: name, price: price, defaultCode: sku);
       AuditLog.instance.add(AuditEntry(
         when: DateTime.now(),

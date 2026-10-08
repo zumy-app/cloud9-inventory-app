@@ -16,11 +16,23 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const _db = 'odoo';
   final _user = TextEditingController();
   final _pass = TextEditingController();
   bool _busy = false;
   String? _err;
   bool _obscure = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill the last username so a rare manual re-login is one field.
+    SessionStore.loadCredentials().then((c) {
+      if (mounted && c != null && _user.text.isEmpty) {
+        setState(() => _user.text = c.login);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -36,13 +48,17 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await widget.client.authenticate(
-        db: 'odoo',
+        db: _db,
         login: _user.text.trim(),
         password: _pass.text,
       );
       final cookie = widget.client.sessionCookie;
       if (cookie == null) throw OdooException('No session cookie');
       await SessionStore.saveSession(cookie, _user.text.trim());
+      // Stored in secure storage: enables one transparent re-login on 401
+      // so an expired session never wipes an in-progress form.
+      await SessionStore.saveCredentials(
+          db: _db, login: _user.text.trim(), password: _pass.text);
       widget.onLoggedIn();
     } on OdooException catch (e) {
       setState(() => _err = e.message);

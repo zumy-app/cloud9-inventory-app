@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'label_model.dart';
+import 'logo_raster.dart';
 import 'tspl.dart';
 
 enum PrinterStatus { idle, connecting, ready, printing, error }
@@ -103,9 +104,20 @@ class PrinterService extends ChangeNotifier {
         throw StateError(UnconfiguredTransport._msg);
       }
       await _transport.connect(addr);
+      // Best-effort logo: same raster the preview shows. Null (missing
+      // asset, decode failure) prints text-only without shifting zones.
+      List<int>? logoMono;
+      var logoWidth = 0;
+      try {
+        final logo = await LogoRaster.bundled();
+        if (logo != null) {
+          logoMono = logo.mono;
+          logoWidth = logo.width;
+        }
+      } catch (_) {}
       for (final m in models) {
-        await _transport.write(
-            Tspl.encode(Tspl.compose(m, density: darkness)));
+        await _transport.write(Tspl.encode(Tspl.compose(m,
+            density: darkness, logoMono: logoMono, logoWidth: logoWidth)));
       }
       await _transport.disconnect();
       status = PrinterStatus.ready;

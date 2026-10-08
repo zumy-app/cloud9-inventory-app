@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SessionStore {
   static const _kCookie = 'odoo_session_cookie';
   static const _kUser = 'odoo_user';
+  static const _kPass = 'odoo_password';
+  static const _kDb = 'odoo_db';
   static const _kLastPosCat = 'last_pos_categ_id';
 
   static const storage = FlutterSecureStorage();
@@ -36,6 +38,47 @@ class SessionStore {
   static Future<void> clear() async {
     await storage.delete(key: _kCookie);
     await storage.delete(key: _kUser);
+    await storage.delete(key: _kPass);
+    await storage.delete(key: _kDb);
+  }
+
+  /// Credentials for transparent session refresh (same secure storage as
+  /// the session cookie). Enables one automatic re-login + retry on 401 so
+  /// an expired mid-shift session never wipes an in-progress form.
+  static Future<void> saveCredentials({
+    required String db,
+    required String login,
+    required String password,
+  }) async {
+    await storage.write(key: _kDb, value: db);
+    await storage.write(key: _kUser, value: login);
+    await storage.write(key: _kPass, value: password);
+  }
+
+  static Future<({String db, String login, String password})?>
+      loadCredentials() async {
+    try {
+      final db = await storage.read(key: _kDb).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => null,
+          );
+      final u = await storage.read(key: _kUser).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => null,
+          );
+      final p = await storage.read(key: _kPass).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => null,
+          );
+      if (u == null || u.isEmpty || p == null || p.isEmpty) return null;
+      return (
+        db: (db == null || db.isEmpty) ? 'odoo' : db,
+        login: u,
+        password: p
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<int?> loadLastPosCat() async {

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../audit_log.dart';
-import '../batch_store.dart';
+import '../label_collections.dart';
 import '../category_map.dart';
 import '../odoo_client.dart';
 import '../print/label_model.dart';
@@ -229,7 +229,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
       setState(() => _recentCats = recent);
       final exp = _expiry == null ? null : _ymd(_expiry!);
       if (exp != null) await SessionStore.saveExpiry(vid, exp);
-      BatchStore.instance.add(
+      LabelCollections.instance.addToActive(
           barcode: code, name: name, price: price, defaultCode: sku);
       AuditLog.instance.add(AuditEntry(
         when: DateTime.now(),

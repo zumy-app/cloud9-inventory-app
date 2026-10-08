@@ -2,10 +2,11 @@
 // Pure Dart, no plugins: output is verified by golden tests
 // (test/tspl_test.dart) and byte-checked on hardware in Phase 0.
 //
-// Layout @203dpi (384 x 200 dots usable):
-//   logo (optional BITMAP) .... top-centered
-//   name + price .............. one row (name truncated, price right-aligned)
-//   barcode ................... below, full width, human-readable digits
+// Layout @203dpi (384 x 200 dots usable), vertical order:
+//   logo (optional BITMAP) .... top-center, capped at 240x24 recommended
+//   name + BIG price .......... one row (name truncated, price right-aligned)
+//   big barcode ............... centered below, human-readable digits
+// Budget: 8 + 24 + 6 + 30 + 10 + 64 + 12 ≈ 154 ≤ 200 dots.
 library;
 
 import 'dart:convert';
@@ -19,6 +20,14 @@ class Tspl {
   /// Printable height in dots at 203dpi for 25mm stock.
   static const int heightDots = 200;
 
+  /// Recommended logo caps so the 200-dot budget survives gap variance.
+  /// The composer accepts larger bitmaps but they push the barcode down.
+  static const int maxLogoWidthDots = 240;
+  static const int maxLogoHeightDots = 24;
+
+  /// Barcode height in dots ("big barcode" while keeping bottom margin).
+  static const int barcodeHeightDots = 64;
+
   /// Pick a printer-native symbology. 12-13 digit numerics get EAN-13
   /// (readers handle UPC-A 11-digit as EAN-13 with leading zero);
   /// everything else falls back to Code 128, which encodes any ASCII.
@@ -30,16 +39,22 @@ class Tspl {
 
   static String _q(String s) => s.replaceAll('"', "'").replaceAll('\n', ' ');
 
-  /// Internal bitmap font "2" metrics at 1x (used for right-alignment).
+  /// Internal bitmap font metrics at 1x (used for right-alignment).
+  /// Font "3" is the BIG price font; font "2" is the name font.
   static const int _font2CharDots = 12;
+  static const int _font3CharDots = 16;
+
+  /// Rough barcode width estimate in dots for centering.
+  /// EAN-13 is fixed-width; Code128 scales with content length.
+  static int barcodeWidthFor(String code, String sym) {
+    if (sym == 'EAN13') return 200;
+    return (code.length * 13 + 40).clamp(80, 340);
+  }
 
   /// Compose one label. [logoMono] is optional pre-rasterized 1-bit pixels
   /// (row-major, 1 = black), [logoWidth] its width in dots; height is
-  /// derived. Logo raster comes from the Bluetooth-spike step (needs an
-  /// image codec); labels print fully without it.
-  ///
-  /// Single name/price row (name truncated to fit), barcode below.
-  /// Worst case with logo: 8 + 70 + 24 + 10 + 64 = 176 ≤ 200 dots.
+  /// derived. Logo raster comes from lib/print/logo_raster.dart; labels
+  /// print fully without it (blank 0-dot gap, zones never shift).
   static String compose(
     LabelModel m, {
     int density = 8,
@@ -80,18 +95,24 @@ class Tspl {
     }
     final price = _q(m.priceText);
     final priceX =
-        (widthDots - 10 - price.length * _font2CharDots).clamp(10, widthDots);
+        (widthDots - 10 - price.length * _font3CharDots).clamp(10, widthDots);
     final maxNameChars =
-        ((priceX - 10 - 10) ~/ _font2CharDots).clamp(1, 64);
-    var name = _q(m.name);
+        ((priceX - 10 - 10) ~/ _font2CharDots).clamp(1, 48);
+    var name = _q(m.displayName);
     if (name.length > maxNameChars) name = name.substring(0, maxNameChars);
     sb.writeln('TEXT 10,$y,"2",0,1,1,"$name"');
-    sb.writeln('TEXT $priceX,$y,"2",0,1,1,"$price"');
+    sb.writeln('TEXT $priceX,$y,"3",0,1,1,"$price"');
     final code = m.code;
     if (code.isNotEmpty) {
       final sym = symbologyFor(code);
-      final by = (y + 34).clamp(0, heightDots - 64);
-      sb.writeln('BARCODE 30,$by,"$sym",64,1,0,2,2,"${_q(code)}"');
+      final w = barcodeWidthFor(code, sym);
+      final bx = ((widthDots - w) ~/ 2).clamp(10, widthDots);
+      final by = (y + 38).clamp(0, heightDots - barcodeHeightDots - 4);
+      sb.writeln(
+          'BARCODE $bx,$by,"$sym",$barcodeHeightDots,1,0,2,2,"${_q(code)}"');
+    } else {
+      final by = (y + 38).clamp(0, heightDots - 24);
+      sb.writeln('TEXT 10,$by,"2",0,1,1,"NO BARCODE"');
     }
     sb.writeln('PRINT ${m.copies < 1 ? 1 : m.copies}');
     return sb.toString();

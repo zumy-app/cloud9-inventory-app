@@ -93,7 +93,12 @@ class _Cloud9AppState extends State<Cloud9App> {
     defaultValue: 'https://admin.cloud9market.net',
   );
 
-  late final OdooClient _client = OdooClient(baseUrl: _baseUrl);
+  late final OdooClient _client = OdooClient(baseUrl: _baseUrl)
+    ..credentialsProvider = SessionStore.loadCredentials
+    ..onSessionRefreshed = ((cookie) async {
+      final s = await SessionStore.loadSession();
+      await SessionStore.saveSession(cookie, s?.user ?? '');
+    });
   bool _ready = false;
   bool _loggedIn = false;
   String _user = '';
@@ -155,7 +160,7 @@ class _Cloud9AppState extends State<Cloud9App> {
                     index: _tab,
                     children: [
                       InventoryHome(client: _client, user: _user),
-                      const BatchScreen(),
+                      BatchScreen(client: _client, user: _user),
                       _AccountTab(
                           user: _user,
                           baseUrl: _baseUrl,

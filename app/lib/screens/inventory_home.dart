@@ -52,19 +52,6 @@ class InventoryHome extends StatelessWidget {
           ),
           _tile(
             context,
-            icon: Icons.list_alt,
-            title: 'View inventory',
-            subtitle: 'Search or browse by category',
-            onTap: () => _go(
-                context,
-                BrowseScreen(
-                    client: client,
-                    user: user,
-                    editable: false,
-                    title: 'View inventory')),
-          ),
-          _tile(
-            context,
             icon: Icons.qr_code_scanner,
             title: 'Update item count',
             subtitle: 'Scan, set quantity, next',

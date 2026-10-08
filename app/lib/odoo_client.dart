@@ -20,6 +20,11 @@ class OdooException implements Exception {
           'In Odoo, open the product and enable stock tracking '
           '(Storable / Track Inventory), then try again. ($msg)';
     }
+    if (msg.contains('not allowed to modify')) {
+      return 'Your Odoo user is not allowed to change products. '
+          'Ask a manager to grant product edit rights in Odoo '
+          '(Settings → Users → access rights), then try again. ($msg)';
+    }
     return msg;
   }
 }
@@ -139,6 +144,15 @@ class OdooClient {
   String? get sessionCookie => _sessionCookie;
   bool get isLoggedIn => _sessionCookie != null;
 
+  /// Supplies stored credentials for one transparent re-login when a call
+  /// hits 401 (see [callKw]). Null/absent means "no auto-refresh".
+  Future<({String db, String login, String password})?> Function()?
+      credentialsProvider;
+
+  /// Invoked with the fresh cookie after a transparent re-login so the
+  /// caller can persist it (form state is untouched — nothing is lost).
+  Future<void> Function(String cookie)? onSessionRefreshed;
+
   void logout() => _sessionCookie = null;
 
   Map<String, dynamic> _decode(http.Response r) {
@@ -198,7 +212,8 @@ class OdooClient {
     }
   }
 
-  Future<dynamic> callKw(
+  /// Single RPC round-trip. Throws OdooException('SESSION_EXPIRED') on 401.
+  Future<dynamic> _postCallKw(
     String model,
     String method,
     List<dynamic> args, {
@@ -220,6 +235,37 @@ class OdooClient {
     if (r.statusCode == 401) throw OdooException('SESSION_EXPIRED');
     final body = _decode(r);
     return body['result'];
+  }
+
+  /// RPC with one transparent re-login on 401: if [credentialsProvider]
+  /// yields stored creds, re-authenticate, persist the fresh cookie via
+  /// [onSessionRefreshed], and retry the call once. The in-progress screen
+  /// never notices (no logout, no lost form). Throws SESSION_EXPIRED when
+  /// refresh is unavailable or fails.
+  Future<dynamic> callKw(
+    String model,
+    String method,
+    List<dynamic> args, {
+    Map<String, dynamic>? kwargs,
+  }) async {
+    try {
+      return await _postCallKw(model, method, args, kwargs: kwargs);
+    } on OdooException catch (e) {
+      if (e.message != 'SESSION_EXPIRED' || credentialsProvider == null) {
+        rethrow;
+      }
+      final creds = await credentialsProvider!();
+      if (creds == null) rethrow;
+      try {
+        await authenticate(
+            db: creds.db, login: creds.login, password: creds.password);
+      } catch (_) {
+        throw OdooException('SESSION_EXPIRED');
+      }
+      final cookie = sessionCookie;
+      if (cookie != null) await onSessionRefreshed?.call(cookie);
+      return await _postCallKw(model, method, args, kwargs: kwargs);
+    }
   }
 
   /// Lookup by barcode, fallback default_code. Returns null when not found.
@@ -365,8 +411,9 @@ class OdooClient {
           InventoryProduct.fromMap((e as Map).cast<String, dynamic>()))
       .toList();
 
-  /// Browse products for the View/Manage lists: free-text search over
-  /// name/barcode/SKU plus optional POS-category filter, paged.
+  /// Browse products for the Manage list: free-text search over
+  /// name/barcode/SKU/internal-category/POS-category plus optional
+  /// POS-category filter, paged.
   /// Returns at most [limit] rows; [more] is true when a full page came
   /// back (caller bumps [offset] for the next page).
   Future<({List<InventoryProduct> rows, bool more})> searchProducts({
@@ -378,13 +425,18 @@ class OdooClient {
     final q = query.trim();
     final domain = <dynamic>[];
     if (q.isNotEmpty) {
-      domain.addAll([
-        '|',
-        '|',
+      // OR-chain over every searchable text field.
+      final ors = [
         ['name', 'ilike', q],
         ['barcode', 'ilike', q],
         ['default_code', 'ilike', q],
-      ]);
+        ['categ_id', 'ilike', q],
+        ['pos_categ_ids', 'ilike', q],
+      ];
+      for (var i = 0; i < ors.length - 1; i++) {
+        domain.add('|');
+      }
+      domain.addAll(ors);
     }
     if (posCategId != null) {
       if (domain.isNotEmpty) domain.insert(0, '&');

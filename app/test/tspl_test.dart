@@ -22,22 +22,47 @@ void main() {
 
   test('composed label fits 2x1 budget and quotes safely', () {
     const m = LabelModel(
-      name: 'Pecan Spinwheels, 2.1 "oz"',
+      name: 'Pecan Spinwheels',
+      size: '2.1 "oz"',
       price: 2.49,
       barcode: '810120476612',
       copies: 2,
     );
     final out = Tspl.compose(m);
     expect(out, contains('SIZE 48 mm,25 mm'));
-    expect(out, contains('BARCODE 30,'));
+    expect(out, contains('BARCODE '));
     expect(out, contains('"EAN13"'));
     expect(out, contains('"810120476612"'));
     expect(out, contains('PRINT 2'));
     expect(out, isNot(contains('"oz"')));
-    // Barcode block must start above the 200-dot bottom edge.
+    // Name line uses the full "name, size" display string.
+    expect(out, contains('Pecan Spinwheels'));
+    // Price is the BIG font "3".
+    expect(out, contains('"3",0,1,1,"\$2.49"'));
+    // Barcode block must start above the 200-dot bottom edge (4-dot margin).
     final by = int.parse(
-        RegExp(r'BARCODE 30,(\d+),').firstMatch(out)!.group(1)!);
-    expect(by, lessThanOrEqualTo(200 - 64));
+        RegExp(r'BARCODE (\d+),(\d+),').firstMatch(out)!.group(2)!);
+    expect(by, lessThanOrEqualTo(200 - 64 - 4));
+  });
+
+  test('barcode is centered and width scales with content', () {
+    expect(Tspl.barcodeWidthFor('810120476612', 'EAN13'), 200);
+    final wide =
+        Tspl.barcodeWidthFor('ABC-123-LONG-SKU-999', '128');
+    final narrow = Tspl.barcodeWidthFor('AB', '128');
+    expect(wide, greaterThan(narrow));
+    const m = LabelModel(name: 'n', price: 1, barcode: '810120476612');
+    final out = Tspl.compose(m);
+    final bx =
+        int.parse(RegExp(r'BARCODE (\d+),').firstMatch(out)!.group(1)!);
+    expect(bx, equals((384 - 200) ~/ 2));
+  });
+
+  test('empty code prints NO BARCODE placeholder, never blank', () {
+    const m = LabelModel(name: 'Bulk Candy', price: 1.5, barcode: '');
+    final out = Tspl.compose(m);
+    expect(RegExp(r'^BARCODE ', multiLine: true).hasMatch(out), isFalse);
+    expect(out, contains('NO BARCODE'));
   });
 
   test('logo bitmap centers and packs bits MSB-first', () {

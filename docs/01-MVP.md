@@ -11,7 +11,7 @@ If it’s not needed to receive a box today, it’s out.
 
 ## MVP scope (3 screens only)
 
-1. **Login** — Odoo URL (fixed to `https://admin.cloud9market.net`), DB (`odoo`), username, password via existing `/web/session/authenticate`. Save session cookie in secure storage. One shared staff user for POC. Logout clears. No API keys, no scopes, no user switch.
+1. **Login** — Odoo URL (fixed to `https://admin.cloud9market.net`), DB (`odoo`), username, password via existing `/web/session/authenticate`. Save session cookie in secure storage. One shared staff user for POC. Logout clears. No API keys, no scopes, no user switch. Credentials are kept in secure storage so a 401 mid-shift triggers one transparent re-login + retry — an expired session never wipes an in-progress form.
 2. **Receive / Count (scan-fix-next loop)** — the whole app. Two modes behind one
    visible toggle (`Receive +` | `Count =`), persisted per-device:
    * Tap Scan → camera (ML Kit via `mobile_scanner`) → barcode string. Manual
@@ -67,7 +67,10 @@ If it’s not needed to receive a box today, it’s out.
    `qty++` with beep, no duplicate card. Scanning a new barcode **auto-saves
    qty only**; any touched-but-unconfirmed cost/price/SKU/category field forces
    a one-tap `Save changes / Discard` prompt first. Text fields are never
-   auto-persisted. Exit anytime via X.
+   auto-persisted. Every save (receive +1, scan-away auto-save, manual save)
+   ends in a green/red result banner; Count mode additionally requires the
+   `before → after` confirm before any write, and exiting with a pending item
+   offers Save & exit / Discard / Stay. Exit anytime via X.
 5. **Category mapping:** one `Category` field with type-to-filter over the
    union of `pos.category` + `product.category` (`Drinks › Soda`). Backed by an
    explicit seeded table (from `CONVENIENCE_STORE_CATEGORY_SCHEMA.md`:

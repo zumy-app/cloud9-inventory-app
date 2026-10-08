@@ -59,6 +59,13 @@ void main() {
         OdooException.friendly('Some other error'), 'Some other error');
   });
 
+  test('access-denied error names the Odoo rights fix', () {
+    final out = OdooException.friendly(
+        "You are not allowed to modify 'Product Template' (product.template) records.");
+    expect(out, contains('not allowed to change products'));
+    expect(out, contains('Settings'));
+  });
+
   test('setStorable enables stock tracking on the template', () async {
     String? lastBody;
     final mock = MockClient((req) async {
@@ -189,8 +196,7 @@ void main() {
     expect(second.first.id, 7);
   });
 
-  test('archiveProduct deactivates the template', () async {
-    String? lastBody;
+  test('archiveProduct deactivates the template', () async {    String? lastBody;
     final mock = MockClient((req) async {
       lastBody = req.body;
       return http.Response(
@@ -211,5 +217,101 @@ void main() {
     await client.archiveProduct(p);
     expect(lastBody, contains('[42]'));
     expect(lastBody, contains('"active":false'));
+  });
+
+  test('callKw re-logs in once on 401 and retries the call', () async {
+    var calls = 0;
+    var authed = 0;
+    String? refreshed;
+    Future<({String db, String login, String password})> creds() async =>
+        (db: 'odoo', login: 'u', password: 'p');
+    final mock = MockClient((req) async {
+      if (req.url.path.contains('authenticate')) {
+        authed++;
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': {'uid': 7, 'session_id': 'fresh123'}
+            }),
+            200);
+      }
+      calls++;
+      if (calls == 1) return http.Response('', 401);
+      return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': [
+              {'id': 1}
+            ]
+          }),
+          200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock)
+      ..credentialsProvider = creds
+      ..onSessionRefreshed = (c) async => refreshed = c;
+    final res = await client.callKw('product.product', 'search_read', []);
+    expect((res as List).length, 1);
+    expect(authed, 1);
+    expect(calls, 2);
+    expect(refreshed, 'session_id=fresh123');
+    expect(client.sessionCookie, 'session_id=fresh123');
+  });
+
+  test('callKw surfaces SESSION_EXPIRED when refresh login fails', () async {
+    Future<({String db, String login, String password})> creds() async =>
+        (db: 'odoo', login: 'u', password: 'wrong');
+    final mock = MockClient((req) async {
+      if (req.url.path.contains('authenticate')) {
+        return http.Response(
+            jsonEncode(
+                {'jsonrpc': '2.0', 'id': 1, 'result': null}),
+            200);
+      }
+      return http.Response('', 401);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock)
+      ..credentialsProvider = creds;
+    await expectLater(
+      client.callKw('product.product', 'search_read', []),
+      throwsA(isA<OdooException>().having(
+          (e) => e.message, 'message', 'SESSION_EXPIRED')),
+    );
+  });
+
+  test('searchProducts matches name, code, SKU and categories', () async {
+    String? lastBody;
+    final mock = MockClient((req) async {
+      lastBody = req.body;
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': []}), 200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    final res = await client.searchProducts(query: 'cola');
+    expect(res.rows, isEmpty);
+    expect(res.more, isFalse);
+    final body = lastBody!;
+    for (final field in [
+      'name',
+      'barcode',
+      'default_code',
+      'categ_id',
+      'pos_categ_ids'
+    ]) {
+      expect(body, contains('"$field"'));
+    }
+    expect(body, contains('"ilike"'));
+  });
+
+  test('callKw surfaces SESSION_EXPIRED with no stored credentials',
+      () async {
+    final mock = MockClient((req) async => http.Response('', 401));
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    await expectLater(
+      client.callKw('product.product', 'search_read', []),
+      throwsA(isA<OdooException>().having(
+          (e) => e.message, 'message', 'SESSION_EXPIRED')),
+    );
   });
 }
