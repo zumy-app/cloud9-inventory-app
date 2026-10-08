@@ -140,7 +140,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
         _selected.removeWhere((id) => !ids.contains(id));
       });
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) setState(() => _err = _friendlyErr(e));
     } catch (e) {
       if (mounted) setState(() => _err = e.toString());
     } finally {
@@ -164,7 +164,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
         _offset += res.rows.length;
       });
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) setState(() => _err = _friendlyErr(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -175,6 +175,13 @@ class _BrowseScreenState extends State<BrowseScreen> {
     final m = _cats.where((c) => c.id == id);
     return m.isEmpty ? '' : m.first.name;
   }
+
+  /// Never leak the raw SESSION_EXPIRED token to staff. Auto-refresh in
+  /// OdooClient already retried once — reaching here means stored creds
+  /// are missing/stale, so a manual sign-in is required.
+  String _friendlyErr(OdooException e) => e.message == 'SESSION_EXPIRED'
+      ? 'Session expired — sign in again (Account tab → Sign out, then sign back in).'
+      : e.message;
 
   void _toggleSelect(InventoryProduct p) {
     setState(() {
@@ -265,7 +272,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
         _selecting = false;
       });
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) setState(() => _err = _friendlyErr(e));
     } catch (e) {
       if (mounted) setState(() => _err = e.toString());
     } finally {
@@ -384,7 +391,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
         printNow: false,
       ));
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) setState(() => _err = _friendlyErr(e));
     } catch (e) {
       if (mounted) setState(() => _err = e.toString());
     } finally {
