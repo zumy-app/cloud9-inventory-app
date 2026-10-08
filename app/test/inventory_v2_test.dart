@@ -314,4 +314,57 @@ void main() {
           (e) => e.message, 'message', 'SESSION_EXPIRED')),
     );
   });
+
+  test('callKw re-logs in on prod 200 code-100 session-expired', () async {
+    // Prod Odoo (admin.cloud9market.net) returns HTTP 200 + code 100
+    // "Odoo Session Expired", not 401. Must still auto-refresh + retry.
+    var calls = 0;
+    var authed = 0;
+    String? refreshed;
+    Future<({String db, String login, String password})> creds() async =>
+        (db: 'odoo', login: 'u', password: 'p');
+    String expiredBody() => jsonEncode({
+          'jsonrpc': '2.0',
+          'id': null,
+          'error': {
+            'code': 100,
+            'message': 'Odoo Session Expired',
+            'data': {
+              'name': 'odoo.http.SessionExpiredException',
+              'message': 'Session expired',
+            },
+          },
+        });
+    final mock = MockClient((req) async {
+      if (req.url.path.contains('authenticate')) {
+        authed++;
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': {'uid': 7, 'session_id': 'fresh123'}
+            }),
+            200);
+      }
+      calls++;
+      if (calls == 1) return http.Response(expiredBody(), 200);
+      return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': [
+              {'id': 1}
+            ]
+          }),
+          200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock)
+      ..credentialsProvider = creds
+      ..onSessionRefreshed = (c) async => refreshed = c;
+    final res = await client.callKw('product.product', 'search_read', []);
+    expect((res as List).length, 1);
+    expect(authed, 1);
+    expect(calls, 2);
+    expect(refreshed, 'session_id=fresh123');
+  });
 }

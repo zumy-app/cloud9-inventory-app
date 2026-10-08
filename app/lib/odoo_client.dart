@@ -164,6 +164,24 @@ class OdooClient {
     }
     if (body is Map && body['error'] != null) {
       final err = body['error'];
+      // Prod Odoo returns HTTP 200 + code 100 "Odoo Session Expired" for a
+      // dead cookie (verified against admin.cloud9market.net) — NOT 401.
+      // Normalize every session-expired shape to SESSION_EXPIRED so
+      // [callKw] can transparently re-login + retry once.
+      if (err is Map) {
+        final code = err['code'];
+        final msg = err['message']?.toString() ?? '';
+        final data = err['data'];
+        final dataName =
+            data is Map ? (data['name']?.toString() ?? '') : '';
+        final dataMsg =
+            data is Map ? (data['message']?.toString() ?? '') : '';
+        final expired = code == 100 ||
+            msg.toLowerCase().contains('session expired') ||
+            dataName.contains('SessionExpired') ||
+            dataMsg.toLowerCase().contains('session expired');
+        if (expired) throw OdooException('SESSION_EXPIRED');
+      }
       final msg = err is Map
           ? (err['data'] is Map && err['data']['message'] != null
               ? err['data']['message'].toString()
