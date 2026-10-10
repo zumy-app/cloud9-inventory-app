@@ -6,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../batch_store.dart';
+import '../i18n/lang.dart';
 import '../label_collections.dart';
 import '../odoo_client.dart';
 import '../print/label_model.dart';
+import '../session_store.dart';
 import '../widgets/label_preview.dart';
 import 'browse.dart';
 import 'print_job_screen.dart';
@@ -109,7 +111,7 @@ class _BatchScreenState extends State<BatchScreen> {
         action: store.active?.id == dest.id
             ? null
             : SnackBarAction(
-                label: 'View',
+                label: t('batch_view'),
                 onPressed: () => store.setActive(dest.id),
               ),
       ),
@@ -131,7 +133,10 @@ class _BatchScreenState extends State<BatchScreen> {
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) =>
-              PrintJobScreen(models: models, title: 'Printing ${dest.name}'),
+              PrintJobScreen(
+                  models: models,
+                  title: Lang.instance
+                      .f('batch_printing', {'name': dest.name})),
         ),
       );
     }
@@ -151,7 +156,8 @@ class _BatchScreenState extends State<BatchScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) =>
-            PrintJobScreen(models: models, title: 'Printing selection'),
+            PrintJobScreen(
+                models: models, title: t('batch_print_selected_title')),
       ),
     );
   }
@@ -194,11 +200,11 @@ class _BatchScreenState extends State<BatchScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(t('batch_cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(c.text.trim()),
-            child: const Text('Save'),
+            child: Text(t('batch_save')),
           ),
         ],
       ),
@@ -211,9 +217,7 @@ class _BatchScreenState extends State<BatchScreen> {
     await SharePlus.instance.share(params);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Shared TSV — run gen-label-pngs.js on the PC'),
-      ),
+      SnackBar(content: Text(t('batch_shared'))),
     );
   }
 
@@ -226,18 +230,51 @@ class _BatchScreenState extends State<BatchScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) =>
-            PrintJobScreen(models: models, title: 'Printing ${active.name}'),
+            PrintJobScreen(
+                models: models,
+                title: Lang.instance
+                    .f('batch_printing', {'name': active.name})),
       ),
     );
   }
 
-  void _openPreview(CollectionLine l) {
+  /// Detail sheet with size edit + promo section. Promo values prefill
+  /// from the line, else from per-product memory (same product promoted
+  /// before); saving writes both the line and the memory.
+  Future<void> _openPreview(CollectionLine l) async {
+    final key = LabelCollections.keyOf(
+        barcode: l.barcode, defaultCode: l.defaultCode, name: l.name);
+    final mem = await SessionStore.loadPromo(key);
+    if (!mounted) return;
     showLabelPreviewSheet(
       context,
       l.model,
       initialSize: l.size,
       onSizeChanged: (v) {
         LabelCollections.instance.updateSize(l, v);
+        Navigator.of(context).pop();
+      },
+      initialPromo: l.wasPrice != null
+          ? (
+              wasPrice: l.wasPrice!,
+              promoEnds: l.promoEnds,
+              saveText: l.saveText,
+            )
+          : mem,
+      onPromoChanged: (p) {
+        LabelCollections.instance.setPromo(l,
+            wasPrice: p.wasPrice,
+            promoEnds: p.promoEnds,
+            saveText: p.saveText);
+        SessionStore.savePromo(key,
+            wasPrice: p.wasPrice,
+            promoEnds: p.promoEnds,
+            saveText: p.saveText);
+        Navigator.of(context).pop();
+      },
+      onPromoCleared: () {
+        LabelCollections.instance.clearPromo(l);
+        SessionStore.clearPromo(key);
         Navigator.of(context).pop();
       },
     );
@@ -255,13 +292,14 @@ class _BatchScreenState extends State<BatchScreen> {
       appBar: AppBar(
         title: Text(
           _lineSel
-              ? '${_lineKeys.length} selected'
+              ? Lang.instance.q(
+                  'batch_sel_one', 'batch_sel_other', _lineKeys.length)
               : '${active.name} (${store.activeTotalCopies})',
         ),
         actions: [
           if (_lineSel)
             IconButton(
-              tooltip: 'Done selecting',
+              tooltip: t('batch_done_select'),
               icon: const Icon(Icons.close),
               onPressed: () => setState(() {
                 _lineSel = false;
@@ -270,13 +308,13 @@ class _BatchScreenState extends State<BatchScreen> {
             )
           else ...[
             IconButton(
-              tooltip: 'Browse items',
+              tooltip: t('batch_browse'),
               icon: const Icon(Icons.playlist_add),
               onPressed: _openPicker,
             ),
             if (lines.isNotEmpty)
               IconButton(
-                tooltip: 'Print all labels',
+                tooltip: t('batch_print_all'),
                 icon: const Icon(Icons.print),
                 onPressed: _printAll,
               ),
@@ -285,11 +323,12 @@ class _BatchScreenState extends State<BatchScreen> {
             onSelected: (v) async {
               switch (v) {
                 case 'new':
-                  final n = await _askName('New collection');
+                  final n = await _askName(t('batch_new'));
                   if (n != null && n.isNotEmpty) store.create(n);
                   break;
                 case 'rename':
-                  final n = await _askName('Rename collection', active.name);
+                  final n =
+                      await _askName(t('batch_rename'), active.name);
                   if (n != null && n.isNotEmpty) store.rename(active, n);
                   break;
                 case 'duplicate':
@@ -306,13 +345,14 @@ class _BatchScreenState extends State<BatchScreen> {
                   break;
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'new', child: Text('New collection')),
-              PopupMenuItem(value: 'rename', child: Text('Rename')),
-              PopupMenuItem(value: 'duplicate', child: Text('Duplicate')),
-              PopupMenuItem(value: 'delete', child: Text('Delete collection')),
-              PopupMenuItem(value: 'clear', child: Text('Clear lines')),
-              PopupMenuItem(value: 'share', child: Text('Share TSV')),
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'new', child: Text(t('batch_new'))),
+              PopupMenuItem(value: 'rename', child: Text(t('batch_rename'))),
+              PopupMenuItem(
+                  value: 'duplicate', child: Text(t('batch_duplicate'))),
+              PopupMenuItem(value: 'delete', child: Text(t('batch_delete'))),
+              PopupMenuItem(value: 'clear', child: Text(t('batch_clear'))),
+              PopupMenuItem(value: 'share', child: Text(t('batch_share'))),
             ],
           ),
         ],
@@ -324,9 +364,9 @@ class _BatchScreenState extends State<BatchScreen> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: DropdownButtonFormField<String>(
                 initialValue: active.id,
-                decoration: const InputDecoration(
-                  labelText: 'Collection',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: t('batch_collection'),
+                  border: const OutlineInputBorder(),
                 ),
                 items: [
                   for (final c in store.collections)
@@ -348,14 +388,14 @@ class _BatchScreenState extends State<BatchScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text(
-                            'Empty.\nScan in Receive with "+ Label" on,\nor browse items to add some.',
+                          Text(
+                            t('batch_empty'),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 12),
                           FilledButton.icon(
                             icon: const Icon(Icons.playlist_add),
-                            label: const Text('Browse items'),
+                            label: Text(t('batch_browse')),
                             onPressed: _openPicker,
                           ),
                         ],
@@ -433,7 +473,8 @@ class _BatchScreenState extends State<BatchScreen> {
                 height: 52,
                 child: FilledButton.icon(
                   icon: const Icon(Icons.print),
-                  label: Text('Print selected (${_lineKeys.length})'),
+                  label: Text(Lang.instance.f('batch_print_selected',
+                      {'n': '${_lineKeys.length}'})),
                   onPressed: _lineKeys.isEmpty ? null : _printSelected,
                 ),
               ),
@@ -446,7 +487,7 @@ class _BatchScreenState extends State<BatchScreen> {
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.share),
-                      label: const Text('Share TSV'),
+                      label: Text(t('batch_share')),
                       onPressed: _share,
                     ),
                   ),
@@ -454,7 +495,7 @@ class _BatchScreenState extends State<BatchScreen> {
                   Expanded(
                     child: FilledButton.icon(
                       icon: const Icon(Icons.print),
-                      label: const Text('Print all'),
+                      label: Text(t('batch_print_all')),
                       onPressed: _printAll,
                     ),
                   ),
@@ -464,10 +505,10 @@ class _BatchScreenState extends State<BatchScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        tooltip: 'New collection',
+        tooltip: t('batch_new'),
         child: const Icon(Icons.add),
         onPressed: () async {
-          final n = await _askName('New collection');
+          final n = await _askName(t('batch_new'));
           if (n != null && n.isNotEmpty) store.create(n);
         },
       ),

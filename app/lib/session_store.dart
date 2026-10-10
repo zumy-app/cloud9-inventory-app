@@ -42,6 +42,21 @@ class SessionStore {
     await storage.delete(key: _kDb);
   }
 
+  static const _kLang = 'app_lang'; // 'en' | 'es', null = follow device
+
+  /// UI language override (per device, survives logout — kept in
+  /// SharedPreferences, not secure storage, by design).
+  static Future<void> saveLang(String lang) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kLang, lang);
+  }
+
+  static Future<String?> loadLang() async {
+    final p = await SharedPreferences.getInstance();
+    final v = p.getString(_kLang);
+    return (v == 'es' || v == 'en') ? v : null;
+  }
+
   /// Credentials for transparent session refresh (same secure storage as
   /// the session cookie). Enables one automatic re-login + retry on 401 so
   /// an expired mid-shift session never wipes an in-progress form.
@@ -158,5 +173,43 @@ class SessionStore {
   static Future<void> saveExpiry(int variantId, String ymd) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_expiryKey(variantId), ymd);
+  }
+
+  // Per-product promo memory for Type 02 labels (was/ends/save),
+  // keyed by the label line key (barcode || SKU || name). Prefills the
+  // promo section next time the same product is promoted.
+  static String _promoKey(String lineKey) => 'promo_$lineKey';
+
+  static Future<void> savePromo(
+    String lineKey, {
+    required double wasPrice,
+    String promoEnds = '',
+    String saveText = '',
+  }) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList(_promoKey(lineKey), [
+      wasPrice.toString(),
+      promoEnds,
+      saveText,
+    ]);
+  }
+
+  static Future<({double wasPrice, String promoEnds, String saveText})?>
+      loadPromo(String lineKey) async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getStringList(_promoKey(lineKey));
+    if (raw == null || raw.isEmpty) return null;
+    final was = double.tryParse(raw[0]);
+    if (was == null) return null;
+    return (
+      wasPrice: was,
+      promoEnds: raw.length > 1 ? raw[1] : '',
+      saveText: raw.length > 2 ? raw[2] : '',
+    );
+  }
+
+  static Future<void> clearPromo(String lineKey) async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove(_promoKey(lineKey));
   }
 }

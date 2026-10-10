@@ -6,11 +6,13 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../i18n/lang.dart';
 import '../label_collections.dart';
 import '../odoo_client.dart';
 import '../print/label_model.dart';
 import '../print/printer_service.dart';
 import '../session_store.dart';
+import '../widgets/feedback.dart';
 import '../widgets/label_preview.dart';
 import 'receive.dart';
 import 'scan.dart';
@@ -210,12 +212,32 @@ class _BrowseScreenState extends State<BrowseScreen> {
       n++;
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('Added $n to labels')));
+    showOk(context, Lang.instance.f('browse_added_n', {'n': '$n'}));
     setState(() {
       _selected.clear();
       _selecting = false;
     });
+  }
+
+  /// Shared >50 confirm dialog for both add-all flows.
+  Future<bool> _confirmAddAll(int count) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(t('browse_addall_title')),
+        content: Text(
+            Lang.instance.f('browse_addall_msg', {'n': '$count'})),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('browse_cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(t('browse_addall'))),
+        ],
+      ),
+    );
+    return ok == true;
   }
 
   /// Bulk add every product matching the current search + category filter.
@@ -234,22 +256,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
       );
       if (!mounted) return;
       if (all.length > 50) {
-        final ok = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Add all to labels?'),
-            content: Text('${all.length} items × 1 copy will be added.'),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel')),
-              FilledButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Add all')),
-            ],
-          ),
-        );
-        if (ok != true || !mounted) {
+        if (!await _confirmAddAll(all.length) || !mounted) {
           setState(() => _busy = false);
           return;
         }
@@ -265,8 +272,8 @@ class _BrowseScreenState extends State<BrowseScreen> {
         );
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Added ${all.length} to labels')));
+      showOk(context,
+          Lang.instance.f('browse_added_n', {'n': '${all.length}'}));
       setState(() {
         _selected.clear();
         _selecting = false;
@@ -301,16 +308,16 @@ class _BrowseScreenState extends State<BrowseScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            OutlinedButton.icon(
-              icon: const Icon(Icons.label),
-              label: const Text('Add all in filter'),
-              onPressed: _busy ? null : _pickAllFlow,
-            ),
-            const Text(
-              'Select items, or add everything matching search + category.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-            ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.label),
+                label: Text(t('browse_addall_filter')),
+                onPressed: _busy ? null : _pickAllFlow,
+              ),
+              Text(
+                t('browse_pick_hint'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
           ],
         ),
       );
@@ -327,21 +334,23 @@ class _BrowseScreenState extends State<BrowseScreen> {
               Expanded(
                 child: FilledButton(
                   onPressed: _busy ? null : () => _popPick(printNow: false),
-                  child: Text('Add ($n)'),
+                  child: Text(
+                      Lang.instance.f('browse_add_n', {'n': '$n'})),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton.tonal(
                   onPressed: _busy ? null : () => _popPick(printNow: true),
-                  child: Text('Add & Print ($n)'),
+                  child: Text(
+                      Lang.instance.f('browse_addprint_n', {'n': '$n'})),
                 ),
               ),
             ],
           ),
           TextButton(
             onPressed: _busy ? null : _pickAllFlow,
-            child: const Text('Add all in filter instead'),
+            child: Text(t('browse_addall_instead')),
           ),
         ],
       ),
@@ -363,22 +372,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
       );
       if (!mounted) return;
       if (all.length > 50) {
-        final ok = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Add all to labels?'),
-            content: Text('${all.length} items × 1 copy will be added.'),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel')),
-              FilledButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Add all')),
-            ],
-          ),
-        );
-        if (ok != true || !mounted) {
+        if (!await _confirmAddAll(all.length) || !mounted) {
           setState(() => _busy = false);
           return;
         }
@@ -407,8 +401,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
     if (widget.editable) {
       final code = p.barcode.isNotEmpty ? p.barcode : p.defaultCode;
       if (code.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('No barcode/SKU — open Update count and type the name lookup there.')));
+        showErr(context, t('browse_nocode'));
         return;
       }
       Navigator.of(context).push(MaterialPageRoute(
@@ -429,7 +422,6 @@ class _BrowseScreenState extends State<BrowseScreen> {
   Future<void> _showDetail(InventoryProduct p, {bool pick = false}) async {
     final expiry = await SessionStore.loadExpiry(p.variantId);
     if (!mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
     final alreadyPicked = _selected.contains(p.variantId);
     showModalBottomSheet(
       context: context,
@@ -445,16 +437,20 @@ class _BrowseScreenState extends State<BrowseScreen> {
                   style: const TextStyle(
                       fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('On hand: ${p.qtyAvailable.toStringAsFixed(0)}',
+            Text(
+                Lang.instance.f('browse_onhand',
+                    {'qty': p.qtyAvailable.toStringAsFixed(0)}),
                 style: const TextStyle(fontSize: 32)),
             const SizedBox(height: 8),
-            Text('Barcode: ${p.barcode.isEmpty ? '—' : p.barcode}'),
-            Text('SKU: ${p.defaultCode.isEmpty ? '—' : p.defaultCode}'),
             Text(
-                'Price: \$${p.listPrice.toStringAsFixed(2)} • Cost: \$${p.standardPrice.toStringAsFixed(2)}'),
+                '${t('browse_barcode')} ${p.barcode.isEmpty ? '—' : p.barcode}'),
             Text(
-                'Category: ${_catName(p.posCategId).isEmpty ? '—' : _catName(p.posCategId)}'),
-            Text('Expires: ${expiry ?? '—'}'),
+                '${t('browse_sku')} ${p.defaultCode.isEmpty ? '—' : p.defaultCode}'),
+            Text(
+                '${t('browse_price')} \$${p.listPrice.toStringAsFixed(2)} • ${t('browse_cost')} \$${p.standardPrice.toStringAsFixed(2)}'),
+            Text(
+                '${t('browse_category')} ${_catName(p.posCategId).isEmpty ? '—' : _catName(p.posCategId)}'),
+            Text('${t('browse_expires')} ${expiry ?? '—'}'),
             const SizedBox(height: 12),
             LabelPreview(
                 model: LabelModel.fromProduct(p), compact: true),
@@ -467,8 +463,8 @@ class _BrowseScreenState extends State<BrowseScreen> {
                       ? Icons.check_circle
                       : Icons.add),
                   label: Text(alreadyPicked
-                      ? 'Selected — tap to remove'
-                      : 'Select this item'),
+                      ? t('browse_selected')
+                      : t('browse_select_item')),
                   onPressed: () {
                     _toggleSelect(p);
                     Navigator.of(context).pop();
@@ -480,17 +476,20 @@ class _BrowseScreenState extends State<BrowseScreen> {
                 height: 52,
                 child: FilledButton.icon(
                   icon: const Icon(Icons.print),
-                  label: const Text('Print label'),
+                  label: Text(t('browse_print')),
                   onPressed: () async {
                     try {
                       await PrinterService.instance.printLabel(
                         LabelModel.fromProduct(p),
                       );
-                      messenger.showSnackBar(SnackBar(
-                          content: Text('Label sent for ${p.name}')));
+                      if (!mounted) return;
+                      showOk(
+                          context,
+                          Lang.instance.f(
+                              'browse_label_sent', {'name': p.name}));
                     } catch (e) {
-                      messenger.showSnackBar(
-                          SnackBar(content: Text('$e')));
+                      if (!mounted) return;
+                      showErr(context, '$e');
                     }
                   },
                 ),
@@ -522,8 +521,9 @@ class _BrowseScreenState extends State<BrowseScreen> {
       builder: (_) => ReceiveScreen(
         client: widget.client,
         user: widget.user,
-        initialBarcode: q,
+        initialBarcode: codeLike ? q : '',
         initialName: codeLike ? '' : q,
+        initialNoBarcode: !codeLike,
       ),
     ));
     if (mounted) await _refresh();
@@ -532,7 +532,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
   Widget _emptyState() {
     final q = _search.text.trim();
     if (q.isEmpty || !widget.editable) {
-      return const Center(child: Text('Search or scan to find items.'));
+      return Center(child: Text(t('browse_empty')));
     }
     return Center(
       child: Padding(
@@ -540,11 +540,12 @@ class _BrowseScreenState extends State<BrowseScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('No match for "$q".', textAlign: TextAlign.center),
+            Text(Lang.instance.f('browse_nomatch', {'q': q}),
+                textAlign: TextAlign.center),
             const SizedBox(height: 12),
             FilledButton.icon(
               icon: const Icon(Icons.add),
-              label: const Text('Add as new item'),
+              label: Text(t('browse_add_new')),
               onPressed: () => _addNew(q),
             ),
           ],
@@ -558,20 +559,23 @@ class _BrowseScreenState extends State<BrowseScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.pickMode
-            ? '${widget.title} • ${_selected.length} selected'
+            ? '${widget.title} • ${Lang.instance.q('batch_sel_one', 'batch_sel_other', _selected.length)}'
             : _selecting
-                ? '${_selected.length} selected'
+                ? Lang.instance.q(
+                    'batch_sel_one', 'batch_sel_other', _selected.length)
                 : widget.title),
         actions: [
           if (widget.pickMode)
             IconButton(
-              tooltip: 'Cancel',
+              tooltip: t('browse_cancel'),
               icon: const Icon(Icons.close),
               onPressed: () => Navigator.of(context).pop(),
             )
           else
             IconButton(
-              tooltip: _selecting ? 'Done selecting' : 'Select labels',
+              tooltip: _selecting
+                  ? t('browse_done_select')
+                  : t('browse_select_labels'),
               icon: Icon(_selecting ? Icons.close : Icons.checklist),
               onPressed: () => setState(() {
                 _selecting = !_selecting;
@@ -589,10 +593,10 @@ class _BrowseScreenState extends State<BrowseScreen> {
                 Expanded(
                   child: TextField(
                     controller: _search,
-                    decoration: const InputDecoration(
-                      labelText: 'Search name, barcode, SKU, or category',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.search),
+                    decoration: InputDecoration(
+                      labelText: t('browse_search_hint'),
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.search),
                     ),
                     textInputAction: TextInputAction.search,
                     onSubmitted: (_) => _refresh(),
@@ -603,7 +607,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
                   height: 56,
                   child: FilledButton.icon(
                     icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan'),
+                    label: Text(t('browse_scan')),
                     onPressed: _busy ? null : _scan,
                   ),
                 ),
@@ -612,13 +616,14 @@ class _BrowseScreenState extends State<BrowseScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-            child: DropdownButtonFormField<int?>(
-              initialValue: _catId,
-              decoration: const InputDecoration(
-                  labelText: 'Category', border: OutlineInputBorder()),
-              items: [
-                const DropdownMenuItem<int?>(
-                    value: null, child: Text('All categories')),
+              child: DropdownButtonFormField<int?>(
+                initialValue: _catId,
+                decoration: InputDecoration(
+                  labelText: t('browse_category_label'),
+                  border: const OutlineInputBorder()),
+                items: [
+                  DropdownMenuItem<int?>(
+                      value: null, child: Text(t('browse_all_cats'))),
                 ..._cats.map((c) =>
                     DropdownMenuItem<int?>(value: c.id, child: Text(c.name))),
               ],
@@ -641,11 +646,12 @@ class _BrowseScreenState extends State<BrowseScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.label),
-                      label: Text(_selected.isEmpty
-                          ? 'Add all in filter'
-                          : 'Add ${_selected.length} to labels'),
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.label),
+                        label: Text(_selected.isEmpty
+                            ? t('browse_addall_filter')
+                            : Lang.instance.f('browse_add_n_labels',
+                                {'n': '${_selected.length}'})),
                       onPressed: _busy
                           ? null
                           : () => _selected.isEmpty
@@ -667,7 +673,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
                           padding: const EdgeInsets.all(16),
                           child: OutlinedButton(
                             onPressed: _busy ? null : _loadMore,
-                            child: const Text('Load more'),
+                            child: Text(t('browse_load_more')),
                           ),
                         );
                       }
@@ -692,13 +698,13 @@ class _BrowseScreenState extends State<BrowseScreen> {
                         selected: sel,
                         title: Text(p.name),
                         subtitle: Text(
-                            '${p.barcode.isEmpty ? (p.defaultCode.isEmpty ? 'no code' : p.defaultCode) : p.barcode} • ${_catName(p.posCategId)}${inTarget ? ' • In collection' : ''}'),
+                            '${p.barcode.isEmpty ? (p.defaultCode.isEmpty ? t('browse_no_code') : p.defaultCode) : p.barcode} • ${_catName(p.posCategId)}${inTarget ? ' • ${t('browse_in_collection')}' : ''}'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (widget.pickMode)
                               IconButton(
-                                tooltip: 'Details',
+                                tooltip: t('browse_details'),
                                 icon: const Icon(Icons.info_outline),
                                 onPressed: _busy
                                     ? null

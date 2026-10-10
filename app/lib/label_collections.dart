@@ -38,6 +38,13 @@ class CollectionLine {
   int copies;
   final DateTime addedAt;
 
+  /// Wireframe template + promo payload. Nullable/absent in old JSON
+  /// loads as standard (tolerant fromJson below).
+  LabelKind kind;
+  double? wasPrice;
+  String promoEnds;
+  String saveText;
+
   CollectionLine({
     required this.barcode,
     required this.name,
@@ -48,6 +55,10 @@ class CollectionLine {
     this.variantId,
     this.copies = 1,
     DateTime? addedAt,
+    this.kind = LabelKind.standard,
+    this.wasPrice,
+    this.promoEnds = '',
+    this.saveText = '',
   }) : addedAt = addedAt ?? DateTime.now();
 
   LabelModel get model => LabelModel(
@@ -58,6 +69,10 @@ class CollectionLine {
     defaultCode: defaultCode,
     category: category,
     copies: copies,
+    kind: kind,
+    wasPrice: wasPrice,
+    promoEnds: promoEnds,
+    saveText: saveText,
   );
 
   Map<String, dynamic> toJson() => {
@@ -70,7 +85,18 @@ class CollectionLine {
     'variantId': variantId,
     'copies': copies,
     'addedAt': addedAt.toIso8601String(),
+    'kind': kind.name,
+    'wasPrice': wasPrice,
+    'promoEnds': promoEnds,
+    'saveText': saveText,
   };
+
+  static LabelKind _kindOf(dynamic v) {
+    for (final k in LabelKind.values) {
+      if (k.name == v) return k;
+    }
+    return LabelKind.standard;
+  }
 
   static CollectionLine fromJson(Map<String, dynamic> m) => CollectionLine(
     barcode: (m['barcode'] ?? '').toString(),
@@ -85,6 +111,12 @@ class CollectionLine {
         : 1,
     addedAt:
         DateTime.tryParse((m['addedAt'] ?? '').toString()) ?? DateTime.now(),
+    kind: _kindOf(m['kind']),
+    wasPrice: (m['wasPrice'] is num)
+        ? (m['wasPrice'] as num).toDouble()
+        : null,
+    promoEnds: (m['promoEnds'] ?? '').toString(),
+    saveText: (m['saveText'] ?? '').toString(),
   );
 }
 
@@ -456,8 +488,8 @@ class LabelCollections extends ChangeNotifier {
   }
 
   void updateSize(CollectionLine l, String size) {
-    // Assign via a new line object is overkill; lines are mutable on
-    // purpose (copies/size only). Name/price stay snapshot-live rules.
+    // Lines are mutable on purpose (copies/size/promo only). A size edit
+    // must preserve kind + promo payload (else promos silently vanish).
     final i = active?.lines.indexOf(l) ?? -1;
     if (i < 0) return;
     active!.lines[i] = CollectionLine(
@@ -470,8 +502,39 @@ class LabelCollections extends ChangeNotifier {
       variantId: l.variantId,
       copies: l.copies,
       addedAt: l.addedAt,
+      kind: l.kind,
+      wasPrice: l.wasPrice,
+      promoEnds: l.promoEnds,
+      saveText: l.saveText,
     );
     active!.touch();
+    notifyListeners();
+    _save();
+  }
+
+  /// Attach a promo payload to a line (flips kind to promo).
+  void setPromo(
+    CollectionLine l, {
+    required double wasPrice,
+    String promoEnds = '',
+    String saveText = '',
+  }) {
+    l.kind = LabelKind.promo;
+    l.wasPrice = wasPrice;
+    l.promoEnds = promoEnds.trim();
+    l.saveText = saveText.trim();
+    active?.touch();
+    notifyListeners();
+    _save();
+  }
+
+  /// Remove a promo payload (reverts kind to standard).
+  void clearPromo(CollectionLine l) {
+    l.kind = LabelKind.standard;
+    l.wasPrice = null;
+    l.promoEnds = '';
+    l.saveText = '';
+    active?.touch();
     notifyListeners();
     _save();
   }

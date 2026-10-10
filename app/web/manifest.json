@@ -1,6 +1,6 @@
 {
-    "name": "cloud9_inventory_app",
-    "short_name": "cloud9_inventory_app",
+    "name": "Cloud 9 Team",
+    "short_name": "Cloud 9 Team",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

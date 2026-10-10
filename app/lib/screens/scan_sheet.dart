@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../audit_log.dart';
+import '../i18n/lang.dart';
 import '../odoo_client.dart';
 
 class ScanSheet extends StatefulWidget {
@@ -137,14 +138,15 @@ class _ScanSheetState extends State<ScanSheet> {
             const SizedBox(height: 8),
             Text(
               denied
-                  ? 'Camera permission denied — allow it in Settings, or type the barcode below.'
-                  : 'Camera failed to start (${error.errorCode.message}). Retry, or type the barcode below.',
+                  ? t('sheet_cam_denied')
+                  : Lang.instance.f('sheet_cam_fail',
+                      {'err': error.errorCode.message}),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             FilledButton(
               onPressed: _retryCamera,
-              child: const Text('Retry camera'),
+              child: Text(t('sheet_retry_cam')),
             ),
           ],
         ),
@@ -161,12 +163,12 @@ class _ScanSheetState extends State<ScanSheet> {
       final rows = await widget.client.findVariants(code);
       if (!mounted) return;
       if (rows.isEmpty) {
-        setState(() => _err = 'Not in Odoo: $code — create it in single mode.');
+        setState(() => _err =
+            Lang.instance.f('sheet_not_found', {'code': code}));
         return;
       }
       if (rows.length > 1) {
-        setState(() =>
-            _err = 'Duplicate barcode — pick the variant in single mode.');
+        setState(() => _err = t('sheet_dup'));
         return;
       }
       setState(() {
@@ -178,8 +180,9 @@ class _ScanSheetState extends State<ScanSheet> {
       setState(() => _scans++);
     } on OdooException catch (e) {
       if (mounted) {
-        setState(() => _err =
-            e.message == 'SESSION_EXPIRED' ? 'Session expired — sign in again.' : e.message);
+        setState(() => _err = e.message == 'SESSION_EXPIRED'
+            ? t('sheet_session')
+            : e.message);
       }
     } catch (e) {
       if (mounted) setState(() => _err = e.toString());
@@ -211,7 +214,11 @@ class _ScanSheetState extends State<ScanSheet> {
         _pending = null;
         _qty.text = '1';
       });
-      _say('Saved ${p.name} +1 → ${after.toStringAsFixed(0)}');
+      _say(Lang.instance.f('recv_saved', {
+        'name': p.name,
+        'qty': '1',
+        'after': after.toStringAsFixed(0)
+      }));
     } on OdooException catch (e) {
       _say(e.message, ok: false);
     } finally {
@@ -225,16 +232,16 @@ class _ScanSheetState extends State<ScanSheet> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Confirm count'),
+        title: Text(t('recv_confirm_count')),
         content: Text(
             '${p.name}\n${p.qtyAvailable.toStringAsFixed(0)} → ${qty.toStringAsFixed(0)}'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel')),
+              child: Text(t('recv_cancel'))),
           FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Confirm')),
+              child: Text(t('recv_confirm'))),
         ],
       ),
     );
@@ -253,15 +260,16 @@ class _ScanSheetState extends State<ScanSheet> {
       final choice = await showDialog<String>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('Unsaved edits'),
-          content: Text('${p.name} has unconfirmed price/detail edits.'),
+          title: Text(t('sheet_unsaved')),
+          content: Text(Lang.instance
+              .f('sheet_unsaved_msg', {'name': p.name})),
           actions: [
             TextButton(
                 onPressed: () => Navigator.of(context).pop('discard'),
-                child: const Text('Discard')),
+                child: Text(t('sheet_discard'))),
             FilledButton(
                 onPressed: () => Navigator.of(context).pop('single'),
-                child: const Text('Edit in single mode')),
+                child: Text(t('sheet_edit_single'))),
           ],
         ),
       );
@@ -276,9 +284,9 @@ class _ScanSheetState extends State<ScanSheet> {
     // Count is absolute (0 allowed, like single mode); receive adds (≥ 1).
     final minQty = _isCount ? 0.0 : 1.0;
     if (qty.isNaN || qty < minQty) {
-      _say(_isCount
-          ? 'Pending ${p.name} has invalid qty — enter 0 or more.'
-          : 'Pending ${p.name} has invalid qty — fix or clear it.');
+      _say(Lang.instance.f(
+          _isCount ? 'sheet_invalid_count' : 'sheet_invalid_receive',
+          {'name': p.name}));
       return false;
     }
     if (_isCount) {
@@ -302,14 +310,19 @@ class _ScanSheetState extends State<ScanSheet> {
         _textDirty = false;
       });
       _say(_isCount
-          ? 'Counted ${p.name}: ${before.toStringAsFixed(0)} → ${after.toStringAsFixed(0)}'
-          : 'Saved ${p.name} +${qty.toStringAsFixed(0)} → ${after.toStringAsFixed(0)}');
+          ? Lang.instance.f('recv_counted', {
+              'name': p.name,
+              'after': after.toStringAsFixed(0)
+            })
+          : Lang.instance.f('recv_saved', {
+              'name': p.name,
+              'qty': qty.toStringAsFixed(0),
+              'after': after.toStringAsFixed(0)
+            }));
       return true;
     } on OdooException catch (e) {
       _say(
-          e.message == 'SESSION_EXPIRED'
-              ? 'Session expired — sign in again.'
-              : e.message,
+          e.message == 'SESSION_EXPIRED' ? t('sheet_session') : e.message,
           ok: false);
       return false;
     } catch (e) {
@@ -344,18 +357,19 @@ class _ScanSheetState extends State<ScanSheet> {
       final choice = await showDialog<String>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('Leave continuous?'),
-          content: Text('${p.name} has an unsaved qty.'),
+          title: Text(t('sheet_leave')),
+          content: Text(Lang.instance
+              .f('sheet_leave_msg', {'name': p.name})),
           actions: [
             TextButton(
                 onPressed: () => Navigator.of(context).pop('stay'),
-                child: const Text('Stay')),
+                child: Text(t('sheet_stay'))),
             TextButton(
                 onPressed: () => Navigator.of(context).pop('discard'),
-                child: const Text('Discard')),
+                child: Text(t('sheet_discard'))),
             FilledButton(
                 onPressed: () => Navigator.of(context).pop('save'),
-                child: const Text('Save & exit')),
+                child: Text(t('sheet_save_exit'))),
           ],
         ),
       );
@@ -374,15 +388,15 @@ class _ScanSheetState extends State<ScanSheet> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          tooltip: 'Exit',
+          tooltip: t('sheet_exit'),
           icon: const Icon(Icons.close),
           onPressed: _exit,
         ),
         title: Text(
-            '${_isCount ? 'Count' : 'Receive'} continuous ($_scans)'),
+            '${_isCount ? t('sheet_count') : t('sheet_receive')} ${t('sheet_continuous')} ($_scans)'),
         actions: [
           IconButton(
-            tooltip: 'Torch',
+            tooltip: t('sheet_torch'),
             icon: Icon(_torch ? Icons.flash_on : Icons.flash_off),
             onPressed: () async {
               await _controller.toggleTorch();
@@ -408,9 +422,9 @@ class _ScanSheetState extends State<ScanSheet> {
                 Expanded(
                   child: TextField(
                     controller: _manual,
-                    decoration: const InputDecoration(
-                        labelText: 'Type barcode + Go',
-                        border: OutlineInputBorder()),
+                    decoration: InputDecoration(
+                        labelText: t('sheet_type_go'),
+                        border: const OutlineInputBorder()),
                     textInputAction: TextInputAction.go,
                     onSubmitted: (v) {
                       _manual.clear();
@@ -467,7 +481,7 @@ class _ScanSheetState extends State<ScanSheet> {
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold)),
                           Text(
-                              'On-hand: ${p.qtyAvailable.toStringAsFixed(0)} • \$${p.listPrice.toStringAsFixed(2)}'),
+                              '${Lang.instance.f('browse_onhand', {'qty': p.qtyAvailable.toStringAsFixed(0)})} • \$${p.listPrice.toStringAsFixed(2)}'),
                           const SizedBox(height: 8),
                           Row(
                             children: [
@@ -490,8 +504,8 @@ class _ScanSheetState extends State<ScanSheet> {
                                       const TextInputType.numberWithOptions(),
                                   decoration: InputDecoration(
                                       labelText: _isCount
-                                          ? 'Counted'
-                                          : 'Qty',
+                                          ? t('sheet_counted')
+                                          : t('sheet_qty'),
                                       border: const OutlineInputBorder()),
                                 ),
                               ),
@@ -514,7 +528,9 @@ class _ScanSheetState extends State<ScanSheet> {
                               Expanded(
                                 child: FilledButton(
                                   onPressed: _busy ? null : _quickPlusOne,
-                                  child: Text(_isCount ? '+1' : '+1 save'),
+                                  child: Text(_isCount
+                                      ? t('sheet_plus1')
+                                      : t('sheet_plus1_save')),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -524,8 +540,8 @@ class _ScanSheetState extends State<ScanSheet> {
                                       ? null
                                       : () => _ensurePendingSaved(),
                                   child: Text(_isCount
-                                      ? 'Set count'
-                                      : 'Save qty'),
+                                      ? t('recv_setcount')
+                                      : t('sheet_save_qty')),
                                 ),
                               ),
                             ],
@@ -537,12 +553,11 @@ class _ScanSheetState extends State<ScanSheet> {
                                 setState(() => _textDirty = true);
                                 Navigator.of(context).pop();
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
+                                    SnackBar(
                                         content: Text(
-                                            'Price/detail edits: use single mode')));
+                                            t('sheet_price_single'))));
                               },
-                              child: const Text(
-                                  'Edit price/details (single mode)'),
+                              child: Text(t('sheet_edit_price')),
                             ),
                           ),
                         ],
@@ -553,9 +568,9 @@ class _ScanSheetState extends State<ScanSheet> {
               ),
             )
           else
-            const Expanded(
+            Expanded(
               child: Center(
-                  child: Text('Point at a barcode — beep means captured.',
+                  child: Text(t('sheet_point'),
                       textAlign: TextAlign.center)),
             ),
         ],

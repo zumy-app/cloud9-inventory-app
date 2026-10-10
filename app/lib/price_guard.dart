@@ -3,6 +3,8 @@
 // the audit line). Stepping stone to manager-key approval (P1).
 library;
 
+import 'i18n/lang.dart';
+
 class PriceGuard {
   /// Fractional delta that triggers the guard (matches 04 §3.6 default).
   static const double deltaPct = 0.20;
@@ -22,7 +24,7 @@ class PriceGuard {
     required double cost,
     required double oldPrice,
   }) {
-    if (newPrice < cost) return 'Below cost — reason required.';
-    return 'Large change (>20%) — reason required.';
+    if (newPrice < cost) return Lang.instance.t('pg_below');
+    return Lang.instance.t('pg_delta');
   }
 }

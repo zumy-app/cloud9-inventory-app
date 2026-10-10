@@ -9,11 +9,13 @@ import 'package:flutter/services.dart';
 import '../audit_log.dart';
 import '../label_collections.dart';
 import '../category_map.dart';
+import '../i18n/lang.dart';
 import '../odoo_client.dart';
 import '../print/label_model.dart';
 import '../print/printer_service.dart';
 import '../session_store.dart';
 import '../widgets/category_picker.dart';
+import '../widgets/feedback.dart';
 import 'receive.dart';
 import 'scan.dart';
 
@@ -45,7 +47,9 @@ class _AddItemScreenState extends State<AddItemScreen> {
   bool _catsLoading = false;
   String? _err;
   bool _continuous = true;
+  bool _noBarcode = false;
   InventoryProduct? _existing;
+  LabelModel? _lastCreated;
 
   CategoryPair? get _pair {
     return CategoryMap.resolveForCreate(
@@ -163,34 +167,43 @@ class _AddItemScreenState extends State<AddItemScreen> {
 
   double _num(String s) => double.tryParse(s.trim()) ?? double.nan;
 
+  void _fail(String inline, [String? toastDetail]) {
+    setState(() => _err = inline);
+    if (mounted) showErr(context, Lang.instance.f('toast_fail', {'detail': toastDetail ?? inline}));
+  }
+
   Future<void> _create() async {
-    final code = _barcode.text.trim();
+    final code = _noBarcode ? '' : _barcode.text.trim();
     final name = _name.text.trim();
     final sku = _sku.text.trim();
     final cost = _num(_cost.text);
     final price = _num(_price.text);
     final qty = _num(_qty.text);
     if (name.length < 2) {
-      setState(() => _err = 'Name is required (≥ 2 chars).');
+      _fail(t('add_err_name'));
+      return;
+    }
+    if (_noBarcode && sku.isEmpty) {
+      _fail(t('add_sku_required'));
       return;
     }
     if (_catId == null || _pair == null) {
-      setState(() => _err = 'Pick a category (still loading — try again).');
+      _fail(t('add_err_cat'));
       return;
     }
     if (cost.isNaN || price.isNaN || qty.isNaN || cost < 0 || price < 0 || qty < 0) {
-      setState(() => _err = 'Enter valid cost, price and qty (≥ 0).');
+      _fail(t('add_err_nums'));
       return;
     }
     String reason = '';
     if (price < cost) {
-      setState(() => _err = 'Below cost — new items must be priced at or above cost.');
+      _fail(t('add_err_belowcost'));
       return;
     }
     if (sku.isNotEmpty) {
       final hits = await widget.client.findBySku(sku);
       if (hits.isNotEmpty && mounted) {
-        setState(() => _err = 'SKU in use by ${hits.first.name}.');
+        _fail(Lang.instance.f('add_err_sku_inuse', {'name': hits.first.name}));
         return;
       }
     }
@@ -201,15 +214,18 @@ class _AddItemScreenState extends State<AddItemScreen> {
     try {
       final pair = _pair!;
       // Barcode collision: route to the existing item instead of duping it.
-      final clash = await widget.client.findVariants(code);
-      if (clash.isNotEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _existing = clash.first;
-          _err = 'Barcode already used by ${clash.first.name} — '
-              'update it instead.';
-        });
-        return;
+      // Skipped for no-barcode items (empty code matches nothing).
+      if (code.isNotEmpty) {
+        final clash = await widget.client.findVariants(code);
+        if (clash.isNotEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _existing = clash.first;
+            _err = Lang.instance
+                .f('add_err_barcode_inuse', {'name': clash.first.name});
+          });
+          return;
+        }
       }
       final vid = await widget.client.createProduct(
         name: name,
@@ -244,39 +260,83 @@ class _AddItemScreenState extends State<AddItemScreen> {
         reason: reason,
       ));
       if (!mounted) return;
-      final messenger = ScaffoldMessenger.of(context);
       final created = LabelModel(
           name: name, price: price, barcode: code, defaultCode: sku);
-      messenger.showSnackBar(SnackBar(
-        content: Text('Added $name (0 → $qty)'),
-        action: SnackBarAction(
-          label: 'Print',
-          onPressed: () async {
-            try {
-              await PrinterService.instance.printLabel(created);
-              messenger.showSnackBar(
-                  SnackBar(content: Text('Label sent for $name')));
-            } catch (e) {
-              messenger.showSnackBar(SnackBar(content: Text('$e')));
-            }
-          },
-        ),
-      ));
+      // Success toast only — the old bottom-right Print action covered
+      // the submit button, so printing now lives in the result card.
+      showOk(context, Lang.instance.f('add_ok', {'name': name}));
       setState(() {
         _barcode.clear();
         _name.clear();
         _sku.clear();
         _expiry = null;
         _existing = null;
+        _lastCreated = created;
       });
       if (_continuous && mounted) await _scan();
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) _fail(e.message, e.message);
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) _fail(e.toString(), e.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _printLast() async {
+    final created = _lastCreated;
+    if (created == null || _busy || !mounted) return;
+    try {
+      await PrinterService.instance.printLabel(created);
+      if (mounted) {
+        showOk(context,
+            Lang.instance.f('add_print_sent', {'name': created.name}));
+      }
+    } catch (e) {
+      if (mounted) showErr(context, '$e');
+    }
+  }
+
+  /// Inline result card for the last saved item: Print lives here now
+  /// (the old bottom-right snackbar action covered the submit button).
+  Widget _resultCard() {
+    final created = _lastCreated!;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(t('add_added_title'),
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              IconButton(
+                tooltip: 'Dismiss',
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() => _lastCreated = null),
+              ),
+            ],
+          ),
+          Text(created.name),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.print),
+            label: Text(t('add_print')),
+            onPressed: _busy ? null : _printLast,
+          ),
+        ],
+      ),
+    );
   }
 
   /// One-tap chips for recently used categories (stale Odoo IDs filtered).
@@ -308,7 +368,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
   Widget build(BuildContext context) {
     final pair = _pair;
     return Scaffold(
-      appBar: AppBar(title: const Text('Add inventory')),
+      appBar: AppBar(title: Text(t('add_title'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -316,17 +376,33 @@ class _AddItemScreenState extends State<AddItemScreen> {
             height: 56,
             child: FilledButton.icon(
               icon: const Icon(Icons.qr_code_scanner, size: 28),
-              label: const Text('Scan barcode', style: TextStyle(fontSize: 20)),
+              label: Text(t('add_scan'), style: const TextStyle(fontSize: 20)),
               onPressed: _busy ? null : _scan,
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _barcode,
-            decoration: const InputDecoration(
-                labelText: 'Barcode (or type it)',
-                border: OutlineInputBorder()),
+            enabled: !_busy && !_noBarcode,
+            decoration: InputDecoration(
+                labelText: t('add_barcode'),
+                border: const OutlineInputBorder()),
           ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(t('add_nobarcode')),
+            subtitle: Text(t('add_nobarcode_hint')),
+            value: _noBarcode,
+            onChanged: _busy
+                ? null
+                : (v) => setState(() {
+                      _noBarcode = v ?? false;
+                      if (_noBarcode) _barcode.clear();
+                      _existing = null;
+                      _err = null;
+                    }),
+          ),
+          if (_lastCreated != null) _resultCard(),
           if (_existing != null) ...[
             const SizedBox(height: 8),
             Container(
@@ -339,15 +415,17 @@ class _AddItemScreenState extends State<AddItemScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                      'Already in inventory: ${_existing!.name} (on-hand: ${_existing!.qtyAvailable.toStringAsFixed(0)})',
+                      Lang.instance.f('add_dup_msg', {
+                        'name': _existing!.name,
+                        'qty': _existing!.qtyAvailable.toStringAsFixed(0)
+                      }),
                       style:
                           const TextStyle(fontWeight: FontWeight.bold)),
-                  const Text(
-                      'Creating again would duplicate it. Update it instead.'),
+                  Text(t('add_dup_sub')),
                   const SizedBox(height: 8),
                   FilledButton(
                     onPressed: _busy ? null : _updateInstead,
-                    child: const Text('Update count instead'),
+                    child: Text(t('add_update_instead')),
                   ),
                 ],
               ),
@@ -355,8 +433,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
           ],
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Continuous add'),
-            subtitle: const Text('Scan the next item right after saving'),
+            title: Text(t('add_continuous')),
+            subtitle: Text(t('add_continuous_sub')),
             value: _continuous,
             onChanged: (v) {
               setState(() => _continuous = v);
@@ -366,16 +444,16 @@ class _AddItemScreenState extends State<AddItemScreen> {
           const SizedBox(height: 8),
           TextField(
             controller: _name,
-            decoration: const InputDecoration(
-                labelText: 'Name *', border: OutlineInputBorder()),
+            decoration: InputDecoration(
+                labelText: t('add_name'), border: const OutlineInputBorder()),
             // Refresh keyword ranking in the picker as the name is typed.
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: _sku,
-            decoration: const InputDecoration(
-                labelText: 'SKU', border: OutlineInputBorder()),
+            decoration: InputDecoration(
+                labelText: t('add_sku'), border: const OutlineInputBorder()),
           ),
           const SizedBox(height: 8),
           _recentChips(),
@@ -388,10 +466,10 @@ class _AddItemScreenState extends State<AddItemScreen> {
                   onSelected: (id) => setState(() => _catId = id),
                 ),
           if (_catId != null && pair == null)
-            const Padding(
-              padding: EdgeInsets.only(top: 4),
-              child: Text('Categories still loading…',
-                  style: TextStyle(color: Colors.grey)),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(t('add_cats_loading'),
+                  style: const TextStyle(color: Colors.grey)),
             ),
           if (pair != null)
             Padding(
@@ -410,8 +488,9 @@ class _AddItemScreenState extends State<AddItemScreen> {
                   controller: _cost,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                      labelText: 'Cost', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                      labelText: t('add_cost'),
+                      border: const OutlineInputBorder()),
                 ),
               ),
               const SizedBox(width: 8),
@@ -420,8 +499,9 @@ class _AddItemScreenState extends State<AddItemScreen> {
                   controller: _price,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                      labelText: 'Price', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                      labelText: t('add_price'),
+                      border: const OutlineInputBorder()),
                 ),
               ),
               const SizedBox(width: 8),
@@ -430,8 +510,9 @@ class _AddItemScreenState extends State<AddItemScreen> {
                   controller: _qty,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                      labelText: 'Qty', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                      labelText: t('add_qty'),
+                      border: const OutlineInputBorder()),
                 ),
               ),
             ],
@@ -440,7 +521,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
           OutlinedButton.icon(
             icon: const Icon(Icons.event),
             label: Text(_expiry == null
-                ? 'Expiry date (optional)'
+                ? t('add_expiry')
                 : 'Expires: ${_ymd(_expiry!)}'),
             onPressed: _busy ? null : _pickExpiry,
           ),
@@ -449,28 +530,28 @@ class _AddItemScreenState extends State<AddItemScreen> {
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () => setState(() => _expiry = null),
-                child: const Text('Clear date'),
+                child: Text(t('add_expiry_clear')),
               ),
             ),
           ExpansionTile(
-            title: const Text('Details'),
+            title: Text(t('add_details')),
             tilePadding: EdgeInsets.zero,
             children: [
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Sellable in POS'),
+                title: Text(t('add_sellable')),
                 value: _saleOk,
                 onChanged: (v) => setState(() => _saleOk = v),
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Purchasable'),
+                title: Text(t('add_purchasable')),
                 value: _purchaseOk,
                 onChanged: (v) => setState(() => _purchaseOk = v),
               ),
-                const Align(
+                Align(
                   alignment: Alignment.centerLeft,
-                  child: Chip(label: Text('Stock tracked')),
+                  child: Chip(label: Text(t('add_stocktracked'))),
                 ),
             ],
           ),
@@ -483,8 +564,8 @@ class _AddItemScreenState extends State<AddItemScreen> {
             height: 52,
             child: FilledButton(
               onPressed: _busy ? null : _create,
-              child: const Text('Add to inventory',
-                  style: TextStyle(fontSize: 18)),
+              child: Text(t('add_submit'),
+                  style: const TextStyle(fontSize: 18)),
             ),
           ),
         ],

@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../category_map.dart';
+import '../i18n/lang.dart';
 import '../odoo_client.dart';
 
 class CategoryPickerField extends StatelessWidget {
@@ -26,9 +27,9 @@ class CategoryPickerField extends StatelessWidget {
   });
 
   String _label() {
-    if (selectedId == null) return 'Tap to choose';
+    if (selectedId == null) return t('cat_choose');
     final m = categories.where((c) => c.id == selectedId);
-    return m.isEmpty ? 'Tap to choose' : m.first.name;
+    return m.isEmpty ? t('cat_choose') : m.first.name;
   }
 
   Future<void> _open(BuildContext context) async {
@@ -54,10 +55,10 @@ class CategoryPickerField extends StatelessWidget {
       onTap: enabled ? () => _open(context) : null,
       borderRadius: BorderRadius.circular(4),
       child: InputDecorator(
-        decoration: const InputDecoration(
-          labelText: 'Category *',
-          border: OutlineInputBorder(),
-          suffixIcon: Icon(Icons.arrow_drop_down),
+        decoration: InputDecoration(
+          labelText: t('cat_label'),
+          border: const OutlineInputBorder(),
+          suffixIcon: const Icon(Icons.arrow_drop_down),
         ),
         child: Text(
           _label(),
@@ -128,17 +129,17 @@ class _CategorySheetState extends State<_CategorySheet> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: TextField(
                 controller: _search,
-                decoration: const InputDecoration(
-                  labelText: 'Search categories',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: t('cat_search'),
+                  prefixIcon: const Icon(Icons.search),
+                  border: const OutlineInputBorder(),
                 ),
                 onChanged: (_) => setState(() {}),
               ),
             ),
             Expanded(
               child: shown.isEmpty
-                  ? const Center(child: Text('No matches — try another word.'))
+                  ? Center(child: Text(t('cat_empty')))
                   : ListView.builder(
                       itemCount: shown.length,
                       itemBuilder: (_, i) {
@@ -151,8 +152,8 @@ class _CategorySheetState extends State<_CategorySheet> {
                               ? const Icon(Icons.check,
                                   color: Colors.green)
                               : (suggested
-                                  ? const Chip(
-                                      label: Text('Suggested'),
+                                  ? Chip(
+                                      label: Text(t('cat_suggested')),
                                       visualDensity:
                                           VisualDensity.compact,
                                     )

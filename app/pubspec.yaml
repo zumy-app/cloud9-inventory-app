@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+5
+version: 1.0.0+6
 
 environment:
   sdk: ^3.12.2
@@ -37,6 +37,8 @@ dependencies:
   http: ^1.2.2
   mobile_scanner: ^7.0.0
   flutter_secure_storage: ^9.2.4
+  flutter_localizations:
+    sdk: flutter
   shared_preferences: ^2.5.3
   share_plus: ^11.0.0
   image: ^4.10.1
@@ -69,12 +71,29 @@ flutter:
   assets:
     - assets/logo.png
 
+  # Label preview typography (wireframe DESIGN.md tokens, OFL-licensed
+  # Google Fonts, bundled so previews render offline in the store).
+  fonts:
+    - family: BarlowCondensed
+      fonts:
+        - asset: assets/fonts/BarlowCondensed-Bold.ttf
+          weight: 700
+    - family: SpaceMono
+      fonts:
+        - asset: assets/fonts/SpaceMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/SpaceMono-Bold.ttf
+          weight: 700
+    - family: SpaceGrotesk
+      fonts:
+        - asset: assets/fonts/SpaceGrotesk-Variable.ttf
+
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: "assets/logo.png"
+  image_path: "store/icon_512.png"
   adaptive_icon_background: "#032561"
-  adaptive_icon_foreground: "assets/logo.png"
+  adaptive_icon_foreground: "store/icon_512.png"
 
   # To add assets to your application, add an assets section, like this:
   # assets:

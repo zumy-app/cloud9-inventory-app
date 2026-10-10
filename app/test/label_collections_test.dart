@@ -1,4 +1,5 @@
 import 'package:cloud9_inventory_app/label_collections.dart';
+import 'package:cloud9_inventory_app/print/label_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -130,6 +131,34 @@ void main() {
     ]);
     expect(summary, (added: 2, merged: 1));
     expect(a.totalCopies, 4); // 1 + merged+1 + 1 + 1
+  });
+
+  test('kind + promo persist and old JSON loads as standard', () {
+    final store = LabelCollections.instance;
+    final c = store.create('Drinks');
+    final l = store.addToActive(barcode: '1', name: 'Coke', price: 9.99);
+    store.setPromo(l, wasPrice: 12.99, promoEnds: 'SUN 11/03', saveText: 'SAVE \$3');
+    expect(l.kind, LabelKind.promo);
+    final back =
+        LabelCollection.fromJson(c.toJson()).lines.single;
+    expect(back.kind, LabelKind.promo);
+    expect(back.wasPrice, 12.99);
+    expect(back.promoEnds, 'SUN 11/03');
+    expect(back.saveText, 'SAVE \$3');
+    // Size edit preserves promo (no silent revert).
+    store.updateSize(l, '12pk');
+    expect(store.activeLines.single.kind, LabelKind.promo);
+    store.clearPromo(store.activeLines.single);
+    expect(store.activeLines.single.kind, LabelKind.standard);
+    expect(store.activeLines.single.wasPrice, isNull);
+    // Legacy JSON without kind keys.
+    final legacy = CollectionLine.fromJson({
+      'barcode': '9',
+      'name': 'Old',
+      'price': 1.0,
+    });
+    expect(legacy.kind, LabelKind.standard);
+    expect(legacy.model.kind, LabelKind.standard);
   });
 
   test('serialization round-trips', () {

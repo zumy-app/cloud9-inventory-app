@@ -2,9 +2,50 @@
 // Single source for BOTH outputs: Bluetooth printing (lib/print/tspl.dart)
 // and the back-office TSV export (lib/batch_store.dart). Add fields here,
 // not in each consumer.
+//
+// Wireframe label types (labels-wireframes/): [LabelKind] selects the
+// template; promo + kitchen payloads are nullable so legacy lines and
+// persisted collections load unchanged.
 library;
 
 import '../odoo_client.dart';
+
+/// Wireframe template selector (2_x_1_thermal_label_*).
+enum LabelKind { standard, promo, rapidScan, kitchen }
+
+/// On-demand kitchen fridge-tag payload (Type 04). All strings are
+/// preformatted display text; the composer places them, never parses.
+class PrepInfo {
+  final String item;
+  final String qty;
+  final String lot;
+  final String preppedBy;
+  final String preppedAt;
+  final String useBy;
+  final String fifoChip;
+  final String station;
+  final String temp;
+  final String allergens;
+  final String origin;
+  final String pan;
+  final String unitText;
+
+  const PrepInfo({
+    required this.item,
+    this.qty = '',
+    this.lot = '',
+    this.preppedBy = '',
+    this.preppedAt = '',
+    this.useBy = '',
+    this.fifoChip = '',
+    this.station = '',
+    this.temp = '',
+    this.allergens = '',
+    this.origin = '',
+    this.pan = '',
+    this.unitText = '',
+  });
+}
 
 class LabelModel {
   /// Base item name as printed (without size).
@@ -26,6 +67,19 @@ class LabelModel {
   /// Copies for PRINT n.
   final int copies;
 
+  /// Wireframe template. Defaults to standard so every existing call
+  /// site and persisted line keeps rendering.
+  final LabelKind kind;
+
+  /// Promo payload (Type 02). Null = not a promo; a promo kind with null
+  /// [wasPrice] renders as standard (defensive, tested).
+  final double? wasPrice;
+  final String promoEnds;
+  final String saveText;
+
+  /// Kitchen payload (Type 04). Null unless [kind] is kitchen.
+  final PrepInfo? prep;
+
   const LabelModel({
     required this.name,
     required this.price,
@@ -34,6 +88,11 @@ class LabelModel {
     this.defaultCode = '',
     this.category = '',
     this.copies = 1,
+    this.kind = LabelKind.standard,
+    this.wasPrice,
+    this.promoEnds = '',
+    this.saveText = '',
+    this.prep,
   });
 
   /// Full name line as printed: "name, size" when a size is present.
@@ -104,6 +163,12 @@ class LabelModel {
     String? defaultCode,
     String? category,
     int? copies,
+    LabelKind? kind,
+    double? wasPrice,
+    bool clearWasPrice = false,
+    String? promoEnds,
+    String? saveText,
+    PrepInfo? prep,
   }) {
     return LabelModel(
       name: name ?? this.name,
@@ -113,6 +178,11 @@ class LabelModel {
       defaultCode: defaultCode ?? this.defaultCode,
       category: category ?? this.category,
       copies: copies ?? this.copies,
+      kind: kind ?? this.kind,
+      wasPrice: clearWasPrice ? null : (wasPrice ?? this.wasPrice),
+      promoEnds: promoEnds ?? this.promoEnds,
+      saveText: saveText ?? this.saveText,
+      prep: prep ?? this.prep,
     );
   }
 

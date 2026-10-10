@@ -8,12 +8,14 @@ import 'package:flutter/services.dart';
 import '../audit_log.dart';
 import '../label_collections.dart';
 import '../category_map.dart';
+import '../i18n/lang.dart';
 import '../odoo_client.dart';
 import '../price_guard.dart';
 import '../print/label_model.dart';
 import '../print/printer_service.dart';
 import '../session_store.dart';
 import '../widgets/category_picker.dart';
+import '../widgets/feedback.dart';
 import 'scan.dart';
 import 'scan_sheet.dart';
 
@@ -23,13 +25,15 @@ class ReceiveScreen extends StatefulWidget {
   final String initialBarcode;
   final String initialMode; // 'receive' | 'count' | '' (= stored pref)
   final String initialName; // prefill for the new-product form (Manage add)
+  final bool initialNoBarcode; // free-text Manage add: no barcode scanned
   const ReceiveScreen(
       {super.key,
       required this.client,
       this.user = '',
       this.initialBarcode = '',
       this.initialMode = '',
-      this.initialName = ''});
+      this.initialName = '',
+      this.initialNoBarcode = false});
 
   @override
   State<ReceiveScreen> createState() => _ReceiveScreenState();
@@ -56,7 +60,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   bool _skuOverride = false;
   bool _showPriceAdjust = false;
   bool _addLabel = true;
+  bool _noBarcode = false;
   bool _quantBlocked = false;
+  // Language-independent flag: a SKU collision is pending 'Use anyway'.
+  // (Never match on translated error text.)
+  bool _skuBlocked = false;
   Future<void> Function()? _retrySave;
   bool _converting = false;
 
@@ -65,6 +73,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
   void _resetSaveState() {
     _quantBlocked = false;
+    _skuBlocked = false;
     _retrySave = null;
     _reasonRequired = false;
     _skuOverride = false;
@@ -105,6 +114,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   void initState() {
     super.initState();
     _nameSeed = widget.initialName.trim();
+    _noBarcode = widget.initialNoBarcode;
     _loadPrefs();
     _loadCats();
     if (widget.initialBarcode.trim().isNotEmpty) {
@@ -230,7 +240,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     } on OdooException catch (e) {
       if (!mounted) return;
       if (e.message == 'SESSION_EXPIRED') {
-        setState(() => _err = 'Session expired — sign in again (Account tab).');
+        setState(() => _err = t('recv_session'));
       } else {
         setState(() => _err = e.message);
       }
@@ -311,7 +321,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final cost = _num(_cost.text);
     final price = _num(_price.text);
     if (cost.isNaN || price.isNaN || cost < 0 || price < 0) {
-      setState(() => _err = 'Enter valid cost and price (≥ 0).');
+      setState(() => _err = t('recv_err_costprice'));
       return null;
     }
     final need = PriceGuard.needsReason(
@@ -337,8 +347,11 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         hits.where((h) => h.variantId != p.variantId).toList(growable: false);
     if (clash.isNotEmpty && !_skuOverride) {
       if (!mounted) return false;
-      setState(() =>
-          _err = 'SKU in use by ${clash.first.name} — change it or tap Use anyway.');
+      setState(() {
+        _err = Lang.instance
+            .f('recv_err_sku', {'name': clash.first.name});
+        _skuBlocked = true;
+      });
       return false;
     }
     return true;
@@ -371,7 +384,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
 
   void _afterSave(String toast) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(toast)));
+    showOk(context, toast);
     _resetSaveState();
     setState(() {
       _barcode.clear();
@@ -403,7 +416,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       if (_catId != null) {
         await SessionStore.saveLastPosCat(_catId!);
       }
-      _afterSave('Saved ${p.name} +$qty → $after');
+      _afterSave(Lang.instance.f('recv_saved',
+          {'name': p.name, 'qty': '$qty', 'after': '$after'}));
     } on OdooException catch (e) {
       if (!mounted) return;
       if (_isQuantBlocked(e.message)) {
@@ -415,8 +429,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         return;
       }
       setState(() => _err = e.message);
+      showErr(context,
+          Lang.instance.f('toast_fail', {'detail': e.message}));
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) {
+        setState(() => _err = e.toString());
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.toString()}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -443,7 +463,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           category: _catLabel(),
         );
       }
-      _afterSave('Counted ${p.name}: → $after');
+      _afterSave(Lang.instance.f(
+          'recv_counted', {'name': p.name, 'after': '$after'}));
     } on OdooException catch (e) {
       if (!mounted) return;
       if (_isQuantBlocked(e.message)) {
@@ -455,8 +476,14 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         return;
       }
       setState(() => _err = e.message);
+      showErr(context,
+          Lang.instance.f('toast_fail', {'detail': e.message}));
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) {
+        setState(() => _err = e.toString());
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.toString()}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -484,13 +511,21 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         setState(() => _retrySave = null);
         await retry();
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('${p.name} is now Storable — save again.')));
+        showOk(context,
+            Lang.instance.f('recv_storable', {'name': p.name}));
       }
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) {
+        setState(() => _err = e.message);
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.message}));
+      }
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) {
+        setState(() => _err = e.toString());
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.toString()}));
+      }
     } finally {
       if (mounted) setState(() => _converting = false);
     }
@@ -503,16 +538,18 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Archive product?'),
-        content: Text(
-            '${p.name}\nBarcode: ${p.barcode.isEmpty ? '—' : p.barcode}\n\nIt will disappear from POS and scans. You can restore it in Odoo (Archived filter).'),
+        title: Text(t('recv_archive_title')),
+        content: Text(Lang.instance.f('recv_archive_msg', {
+          'name': p.name,
+          'code': p.barcode.isEmpty ? '—' : p.barcode
+        })),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel')),
+              child: Text(t('recv_cancel'))),
           FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Archive')),
+              child: Text(t('recv_archive_btn'))),
         ],
       ),
     );
@@ -529,16 +566,25 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             _duplicates.removeWhere((d) => d.variantId == p.variantId));
       }
       if (_found?.variantId == p.variantId) {
-        _afterSave('Archived ${p.name}');
+        _afterSave(
+            Lang.instance.f('recv_archived', {'name': p.name}));
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Archived ${p.name}')));
+        showOk(context,
+            Lang.instance.f('recv_archived', {'name': p.name}));
         setState(() => _busy = false);
       }
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) {
+        setState(() => _err = e.message);
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.message}));
+      }
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) {
+        setState(() => _err = e.toString());
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.toString()}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -549,14 +595,13 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final p = _found;
     if (p == null || _busy) return;
     if (_name.text.trim().length < 2 && _name.text.trim() != p.name) {
-      setState(() => _err = 'Name must be at least 2 characters.');
+      setState(() => _err = t('recv_err_name2'));
       return;
     }
     final qtyRaw = _qty.text.trim();
     final qty = qtyRaw.isEmpty ? 0.0 : _num(qtyRaw);
     if (qty.isNaN || qty < 0) {
-      setState(
-          () => _err = 'Enter qty to add (≥ 0), or leave empty for details only.');
+      setState(() => _err = t('recv_err_qty_add'));
       return;
     }
     final checked = _checkPrices(p);
@@ -575,12 +620,21 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         if (mounted) setState(() => _busy = false);
         await _finishAddStock(p, qty, checked.price);
       } else {
-        _afterSave('Updated ${p.name} (no stock change)');
+        _afterSave(
+            Lang.instance.f('recv_updated', {'name': p.name}));
       }
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) {
+        setState(() => _err = e.message);
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.message}));
+      }
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) {
+        setState(() => _err = e.toString());
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.toString()}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -592,7 +646,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final p = _found;
     if (p == null || _busy) return;
     if (_qty.text.trim().isEmpty && !_showPriceAdjust) {
-      setState(() => _err = 'Enter the counted qty (no default in Count mode).');
+      setState(() => _err = t('recv_err_count_blank'));
       return;
     }
     if (_qty.text.trim().isEmpty) {
@@ -609,11 +663,20 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         }
         await _applyNameSkuPrices(
             p, checked.cost, checked.price, checked.reason);
-        _afterSave('Prices updated for ${p.name} (no count change)');
+        _afterSave(Lang.instance
+            .f('recv_prices_updated', {'name': p.name}));
       } on OdooException catch (e) {
-        if (mounted) setState(() => _err = e.message);
+        if (mounted) {
+          setState(() => _err = e.message);
+          showErr(context,
+              Lang.instance.f('toast_fail', {'detail': e.message}));
+        }
       } catch (e) {
-        if (mounted) setState(() => _err = e.toString());
+        if (mounted) {
+          setState(() => _err = e.toString());
+          showErr(context,
+              Lang.instance.f('toast_fail', {'detail': e.toString()}));
+        }
       } finally {
         if (mounted) setState(() => _busy = false);
       }
@@ -621,7 +684,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     }
     final counted = _num(_qty.text);
     if (counted.isNaN || counted < 0) {
-      setState(() => _err = 'Enter counted qty (≥ 0).');
+      setState(() => _err = t('recv_err_counted'));
       return;
     }
     double cost = p.standardPrice;
@@ -637,16 +700,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Confirm count'),
+        title: Text(t('recv_confirm_count')),
         content: Text(
             '${p.name}\n${p.qtyAvailable.toStringAsFixed(0)} → ${counted.toStringAsFixed(0)}'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel')),
+              child: Text(t('recv_cancel'))),
           FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Confirm')),
+              child: Text(t('recv_confirm'))),
         ],
       ),
     );
@@ -666,36 +729,48 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       if (mounted) setState(() => _busy = false);
       await _finishSetCount(p, counted, price);
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) {
+        setState(() => _err = e.message);
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.message}));
+      }
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) {
+        setState(() => _err = e.toString());
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.toString()}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _createNew() async {
-    final code = _barcode.text.trim();
+    final code = _noBarcode ? '' : _barcode.text.trim();
     final name = _newName.text.trim();
     final sku = _newSku.text.trim();
     final cost = _num(_newCost.text);
     final price = _num(_newPrice.text);
     final qty = _num(_newQty.text);
     if (name.length < 2) {
-      setState(() => _err = 'Name is required (≥ 2 chars).');
+      setState(() => _err = t('recv_err_new_name'));
+      return;
+    }
+    if (_noBarcode && sku.isEmpty) {
+      setState(() => _err = t('add_sku_required'));
       return;
     }
     if (_catId == null) {
-      setState(() => _err = 'Pick a category.');
+      setState(() => _err = t('recv_err_pickcat'));
       return;
     }
     final pair = _pair;
     if (pair == null) {
-      setState(() => _err = 'Categories still loading — try again.');
+      setState(() => _err = t('recv_err_cats'));
       return;
     }
     if (cost.isNaN || price.isNaN || qty.isNaN || cost < 0 || price < 0 || qty < 0) {
-      setState(() => _err = 'Enter valid cost, price and qty (≥ 0).');
+      setState(() => _err = t('recv_err_nums'));
       return;
     }
     String reason = '';
@@ -710,7 +785,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     if (sku.isNotEmpty) {
       final hits = await widget.client.findBySku(sku);
       if (hits.isNotEmpty && mounted) {
-        setState(() => _err = 'SKU in use by ${hits.first.name}.');
+        setState(() => _err = Lang.instance
+            .f('recv_err_sku_new', {'name': hits.first.name}));
         return;
       }
     }
@@ -730,8 +806,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
           setState(() => _duplicates = clash);
         }
         if (mounted) {
-          setState(() => _err =
-              'Barcode already used by ${clash.first.name} — opened it instead.');
+          setState(() => _err = Lang.instance.f(
+              'recv_barcode_inuse', {'name': clash.first.name}));
         }
         return;
       }
@@ -765,16 +841,24 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         reason: reason,
       ));
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Created $name (0 → $qty)')));
+      showOk(context, Lang.instance
+          .f('recv_created', {'name': name, 'qty': '$qty'}));
       setState(() {
         _barcode.clear();
         _newName.clear();
       });
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      if (mounted) {
+        setState(() => _err = e.message);
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.message}));
+      }
     } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
+      if (mounted) {
+        setState(() => _err = e.toString());
+        showErr(context,
+            Lang.instance.f('toast_fail', {'detail': e.toString()}));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -783,17 +867,18 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
   /// Print one label for the current card via the paired printer.
   /// Unconfigured transport surfaces as a pairing prompt, never a crash.
   Future<void> _printLabel(InventoryProduct p) async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final price = _num(_price.text);
       await PrinterService.instance.printLabel(
         LabelModel.fromProduct(p,
             priceOverride: price.isNaN ? null : price),
       );
-      messenger.showSnackBar(
-          SnackBar(content: Text('Label sent for ${p.name}')));
+      if (mounted) {
+        showOk(context,
+            Lang.instance.f('recv_label_sent', {'name': p.name}));
+      }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) showErr(context, '$e');
     }
   }
 
@@ -802,7 +887,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final r = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Reason required'),
+        title: Text(t('recv_reason_title')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -811,17 +896,18 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             const SizedBox(height: 8),
             TextField(
                 controller: c,
-                decoration: const InputDecoration(
-                    labelText: 'Reason', border: OutlineInputBorder())),
+                decoration: InputDecoration(
+                    labelText: t('recv_reason_label'),
+                    border: const OutlineInputBorder())),
           ],
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel')),
+              child: Text(t('recv_cancel'))),
           FilledButton(
               onPressed: () => Navigator.of(context).pop(c.text.trim()),
-              child: const Text('Continue')),
+              child: Text(t('recv_continue'))),
         ],
       ),
     );
@@ -838,10 +924,10 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
     final showCreate = code.isNotEmpty && _found == null && _duplicates.isEmpty && !_busy;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isCount ? 'Update count' : 'Receive delivery'),
+        title: Text(_isCount ? t('recv_update_title') : t('recv_receive_title')),
         actions: [
           IconButton(
-            tooltip: 'Rapid scan',
+            tooltip: t('recv_rapid'),
             icon: const Icon(Icons.burst_mode),
             onPressed: _busy ? null : _openContinuous,
           ),
@@ -854,7 +940,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             height: 56,
             child: FilledButton.icon(
               icon: const Icon(Icons.qr_code_scanner, size: 28),
-              label: const Text('Scan', style: TextStyle(fontSize: 20)),
+              label: Text(t('recv_scan'), style: const TextStyle(fontSize: 20)),
               onPressed: _busy ? null : _scan,
             ),
           ),
@@ -864,9 +950,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               Expanded(
                 child: TextField(
                   controller: _barcode,
-                  decoration: const InputDecoration(
-                    labelText: 'Barcode (or type + Go)',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: t('recv_barcode_hint'),
+                    border: const OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.text,
                   textInputAction: TextInputAction.go,
@@ -883,7 +969,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Go'),
+                      : Text(t('recv_go')),
                 ),
               ),
             ],
@@ -912,19 +998,18 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('No stock tracking ($kind)',
+          Text(Lang.instance.f('recv_convert_title', {'kind': kind}),
               style: const TextStyle(fontWeight: FontWeight.bold)),
-          const Text(
-              'Odoo cannot hold stock for this type. Convert it to Storable to save quantities here.'),
+          Text(t('recv_convert_sub')),
           const SizedBox(height: 8),
           FilledButton(
             onPressed:
                 (_busy || _converting) ? null : _convertAndRetry,
             child: Text(_converting
-                ? 'Converting…'
+                ? t('recv_converting')
                 : (_retrySave != null
-                    ? 'Convert to Storable & retry'
-                    : 'Convert to Storable')),
+                    ? t('recv_convert_retry')
+                    : t('recv_convert_btn'))),
           ),
         ],
       ),
@@ -939,20 +1024,20 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Duplicate barcode — pick the right item',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Text(
-                'Saving is blocked until you choose. Stock must land on the right variant.'),
+            Text(t('recv_dup_title'),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(t('recv_dup_sub')),
             const SizedBox(height: 8),
             ..._duplicates.map((d) => ListTile(
                   title: Text(d.name),
-                  subtitle: Text(
-                      'SKU: ${d.defaultCode.isEmpty ? '—' : d.defaultCode} • On-hand: ${d.qtyAvailable.toStringAsFixed(0)}'),
-                  trailing: Row(
+                      subtitle: Text(
+                      '${t('browse_sku')} ${d.defaultCode.isEmpty ? '—' : d.defaultCode} • ${Lang.instance.f('browse_onhand', {'qty': d.qtyAvailable.toStringAsFixed(0)})}'),
+                    trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        tooltip: 'Archive ${d.name}',
+                        tooltip: Lang.instance
+                            .f('recv_archive_tip', {'name': d.name}),
                         icon: const Icon(Icons.archive_outlined,
                             color: Colors.red),
                         onPressed:
@@ -981,7 +1066,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text(
-                'Barcode: ${p.barcode.isNotEmpty ? p.barcode : '—'}  •  On-hand: ${p.qtyAvailable.toStringAsFixed(0)}'),
+                '${t('browse_barcode')} ${p.barcode.isNotEmpty ? p.barcode : '—'}  •  ${Lang.instance.f('browse_onhand', {'qty': p.qtyAvailable.toStringAsFixed(0)})}'),
             if (!p.tracksStock || _quantBlocked) ...[
               const SizedBox(height: 8),
               _convertBanner(p),
@@ -989,14 +1074,16 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: _name,
-              decoration: const InputDecoration(
-                  labelText: 'Name', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: t('recv_name'),
+                  border: const OutlineInputBorder()),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _sku,
-              decoration: const InputDecoration(
-                  labelText: 'SKU', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: t('recv_sku'),
+                  border: const OutlineInputBorder()),
             ),
             const SizedBox(height: 8),
             if (!_isCount || _showPriceAdjust) ...[
@@ -1004,17 +1091,18 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 controller: _cost,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: 'Purchase price (cost)',
-                    border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: t('recv_cost'),
+                    border: const OutlineInputBorder()),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _price,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: 'Sale price', border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: t('recv_price'),
+                    border: const OutlineInputBorder()),
               ),
               const SizedBox(height: 8),
             ],
@@ -1023,7 +1111,7 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   onPressed: () => setState(() => _showPriceAdjust = true),
-                  child: const Text('Adjust price'),
+                  child: Text(t('recv_adjust_price')),
                 ),
               ),
             TextField(
@@ -1031,37 +1119,38 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
-                  labelText: _isCount ? 'Counted qty' : 'Qty to add',
+                  labelText:
+                      _isCount ? t('recv_qty_count') : t('recv_qty_add'),
                   helperText: _isCount
-                      ? 'Leave empty for prices only'
-                      : 'Leave empty for details only',
+                      ? t('recv_qty_help_count')
+                      : t('recv_qty_help_receive'),
                   border: const OutlineInputBorder()),
             ),
             if (_reasonRequired) ...[
               const SizedBox(height: 8),
               TextField(
                 controller: _reason,
-                decoration: const InputDecoration(
-                    labelText: 'Reason (required)',
-                    border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: t('recv_reason_req'),
+                    border: const OutlineInputBorder()),
               ),
             ],
-            if (_err != null &&
-                _err!.startsWith('SKU in use')) ...[
+            if (_skuBlocked) ...[
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   onPressed: () => setState(() {
                     _skuOverride = true;
+                    _skuBlocked = false;
                     _err = null;
                   }),
-                  child: const Text('Use anyway'),
+                  child: Text(t('recv_use_anyway')),
                 ),
               ),
             ],
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Add to label batch'),
+              title: Text(t('recv_add_label')),
               value: _addLabel,
               onChanged: (v) => setState(() => _addLabel = v),
             ),
@@ -1070,8 +1159,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 height: 52,
                 child: FilledButton(
                   onPressed: _busy ? null : _updateItem,
-                  child: const Text('Update',
-                      style: TextStyle(fontSize: 18)),
+                  child: Text(t('recv_update'),
+                      style: const TextStyle(fontSize: 18)),
                 ),
               ),
             if (_isCount)
@@ -1079,8 +1168,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                 height: 52,
                 child: FilledButton(
                   onPressed: _busy ? null : _setCount,
-                  child: const Text('Set count',
-                      style: TextStyle(fontSize: 18)),
+                  child: Text(t('recv_setcount'),
+                      style: const TextStyle(fontSize: 18)),
                 ),
               ),
             const SizedBox(height: 8),
@@ -1088,8 +1177,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               height: 52,
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.print),
-                label: const Text('Print label',
-                    style: TextStyle(fontSize: 16)),
+                label: Text(t('recv_print'),
+                    style: const TextStyle(fontSize: 16)),
                 onPressed: _busy ? null : () => _printLabel(p),
               ),
             ),
@@ -1098,8 +1187,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               child: TextButton.icon(
                 icon: const Icon(Icons.archive_outlined,
                     color: Colors.red, size: 18),
-                label: const Text('Archive product',
-                    style: TextStyle(color: Colors.red)),
+                label: Text(t('recv_archive'),
+                    style: const TextStyle(color: Colors.red)),
                 onPressed: _busy ? null : () => _confirmArchive(p),
               ),
             ),
@@ -1118,22 +1207,38 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Not in Odoo — new product',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('Barcode: $code'),
+            Text(t('recv_new_title'),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(Lang.instance.f('recv_new_barcode',
+                {'code': code.isEmpty ? '—' : code})),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(t('add_nobarcode')),
+              subtitle: Text(t('add_nobarcode_hint')),
+              value: _noBarcode,
+              onChanged: _busy
+                  ? null
+                  : (v) => setState(() {
+                        _noBarcode = v ?? false;
+                        _err = null;
+                      }),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _newName,
-              decoration: const InputDecoration(
-                  labelText: 'Name *', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: t('recv_new_name'),
+                  border: const OutlineInputBorder()),
               // Refresh keyword ranking in the picker as the name is typed.
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _newSku,
-              decoration: const InputDecoration(
-                  labelText: 'SKU', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: t('recv_sku'),
+                  border: const OutlineInputBorder()),
             ),
             const SizedBox(height: 8),
             _recentChips(),
@@ -1146,18 +1251,24 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     onSelected: (id) => setState(() => _catId = id),
                   ),
             if (_catId != null && pair == null)
-              const Padding(
-                padding: EdgeInsets.only(top: 4),
-                child: Text('Categories still loading…',
-                    style: TextStyle(color: Colors.grey)),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(t('recv_cats_loading'),
+                    style: const TextStyle(color: Colors.grey)),
               ),
             if (pair != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
                     _isExactPair
-                        ? 'Maps to: ${pair.internalName} + POS ${pair.posName}'
-                        : 'Maps to: ${pair.internalName} (fallback) + POS ${pair.posName}',
+                        ? Lang.instance.f('recv_maps_to', {
+                            'a': pair.internalName,
+                            'b': pair.posName
+                          })
+                        : Lang.instance.f('recv_maps_to_fb', {
+                            'a': pair.internalName,
+                            'b': pair.posName
+                          }),
                     style: const TextStyle(color: Colors.grey)),
               ),
             const SizedBox(height: 8),
@@ -1168,8 +1279,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     controller: _newCost,
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true),
-                    decoration: const InputDecoration(
-                        labelText: 'Cost', border: OutlineInputBorder()),
+                    decoration: InputDecoration(
+                        labelText: t('add_cost'),
+                        border: const OutlineInputBorder()),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1178,8 +1290,9 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     controller: _newPrice,
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true),
-                    decoration: const InputDecoration(
-                        labelText: 'Price', border: OutlineInputBorder()),
+                    decoration: InputDecoration(
+                        labelText: t('add_price'),
+                        border: const OutlineInputBorder()),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1188,31 +1301,32 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
                     controller: _newQty,
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true),
-                    decoration: const InputDecoration(
-                        labelText: 'Qty', border: OutlineInputBorder()),
+                    decoration: InputDecoration(
+                        labelText: t('add_qty'),
+                        border: const OutlineInputBorder()),
                   ),
                 ),
               ],
             ),
             ExpansionTile(
-              title: const Text('Details'),
+              title: Text(t('add_details')),
               tilePadding: EdgeInsets.zero,
               children: [
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Sellable in POS'),
+                  title: Text(t('add_sellable')),
                   value: _newSaleOk,
                   onChanged: (v) => setState(() => _newSaleOk = v),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Purchasable'),
+                  title: Text(t('add_purchasable')),
                   value: _newPurchaseOk,
                   onChanged: (v) => setState(() => _newPurchaseOk = v),
                 ),
-                const Align(
+                Align(
                   alignment: Alignment.centerLeft,
-                  child: Chip(label: Text('Stock tracked')),
+                  child: Chip(label: Text(t('add_stocktracked'))),
                 ),
               ],
             ),
@@ -1221,8 +1335,8 @@ class _ReceiveScreenState extends State<ReceiveScreen> {
               height: 52,
               child: FilledButton(
                 onPressed: _busy ? null : _createNew,
-                child:
-                    const Text('Create & next', style: TextStyle(fontSize: 18)),
+                child: Text(t('recv_create'),
+                    style: const TextStyle(fontSize: 18)),
               ),
             ),
           ],

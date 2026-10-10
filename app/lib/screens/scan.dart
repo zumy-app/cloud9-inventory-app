@@ -4,6 +4,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../i18n/lang.dart';
+
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
 
@@ -66,14 +68,15 @@ class _ScanScreenState extends State<ScanScreen> {
             const SizedBox(height: 12),
             Text(
               denied
-                  ? 'Camera permission denied — allow it in Settings, or go back and type the barcode.'
-                  : 'Camera failed to start (${error.errorCode.message}). You can retry, or go back and type the barcode.',
+                  ? t('scan_cam_denied')
+                  : Lang.instance.f('scan_cam_fail',
+                      {'err': error.errorCode.message}),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: _retry,
-              child: const Text('Retry camera'),
+              child: Text(t('scan_retry')),
             ),
           ],
         ),
@@ -85,10 +88,10 @@ class _ScanScreenState extends State<ScanScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scan barcode'),
+        title: Text(t('scan_title')),
         actions: [
           IconButton(
-            tooltip: 'Torch',
+            tooltip: t('scan_torch'),
             icon: Icon(_torch ? Icons.flash_on : Icons.flash_off),
             onPressed: () async {
               await _controller.toggleTorch();
@@ -106,9 +109,9 @@ class _ScanScreenState extends State<ScanScreen> {
               errorBuilder: _errorFallback,
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('Point at the barcode. Torch is top-right.'),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(t('scan_point')),
           ),
         ],
       ),

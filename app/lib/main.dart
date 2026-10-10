@@ -2,15 +2,18 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'batch_store.dart';
+import 'i18n/lang.dart';
 import 'odoo_client.dart';
 import 'screens/batch.dart';
 import 'screens/inventory_home.dart';
 import 'screens/login.dart';
 import 'session_store.dart';
+import 'widgets/lang_switch.dart';
 
-/// Brand palette sampled from the Cloud 9 Kitchen & Market oval:
+/// Brand palette sampled from the Cloud 9 Team oval:
 /// orange field, white lettering, near-black outline.
 const _brandOrange = Color(0xFFF26522);
 const _brandInk = Color(0xFF141414);
@@ -112,6 +115,11 @@ class _Cloud9AppState extends State<Cloud9App> {
 
   Future<void> _restore() async {
     try {
+      await Lang.instance.load();
+    } catch (_) {
+      // Prefs unavailable (e.g. widget test) -> default English.
+    }
+    try {
       final s = await SessionStore.loadSession();
       if (s != null) {
         _client.setSessionCookie(s.cookie);
@@ -147,41 +155,55 @@ class _Cloud9AppState extends State<Cloud9App> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Cloud 9 Inventory',
-      theme: _brandTheme(),
-      home: !_ready
-          ? const Scaffold(
-              body: Center(child: CircularProgressIndicator()))
-          : !_loggedIn
-              ? LoginScreen(client: _client, onLoggedIn: _onLoggedIn)
-              : Scaffold(
-                  body: IndexedStack(
-                    index: _tab,
-                    children: [
-                      InventoryHome(client: _client, user: _user),
-                      BatchScreen(client: _client, user: _user),
-                      _AccountTab(
-                          user: _user,
-                          baseUrl: _baseUrl,
-                          onLogout: _logout),
-                    ],
+    return ListenableBuilder(
+      listenable: Lang.instance,
+      builder: (context, child) => MaterialApp(
+        title: 'Cloud 9 Team',
+        theme: _brandTheme(),
+        locale: Lang.instance.current == AppLang.es
+            ? const Locale('es')
+            : const Locale('en'),
+        supportedLocales: const [Locale('en'), Locale('es')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: !_ready
+            ? const Scaffold(
+                body: Center(child: CircularProgressIndicator()))
+            : !_loggedIn
+                ? LoginScreen(client: _client, onLoggedIn: _onLoggedIn)
+                : Scaffold(
+                    body: IndexedStack(
+                      index: _tab,
+                      children: [
+                        InventoryHome(client: _client, user: _user),
+                        BatchScreen(client: _client, user: _user),
+                        _AccountTab(
+                            user: _user,
+                            baseUrl: _baseUrl,
+                            onLogout: _logout),
+                      ],
+                    ),
+                    bottomNavigationBar: NavigationBar(
+                      selectedIndex: _tab,
+                      onDestinationSelected: (i) =>
+                          setState(() => _tab = i),
+                      destinations: [
+                        NavigationDestination(
+                            icon: const Icon(Icons.inventory_2),
+                            label: t('nav_inventory')),
+                        NavigationDestination(
+                            icon: const Icon(Icons.label),
+                            label: t('nav_labels')),
+                        NavigationDestination(
+                            icon: const Icon(Icons.person),
+                            label: t('nav_account')),
+                      ],
+                    ),
                   ),
-                  bottomNavigationBar: NavigationBar(
-                    selectedIndex: _tab,
-                    onDestinationSelected: (i) =>
-                        setState(() => _tab = i),
-                    destinations: const [
-                      NavigationDestination(
-                          icon: Icon(Icons.inventory_2),
-                          label: 'Inventory'),
-                      NavigationDestination(
-                          icon: Icon(Icons.label), label: 'Labels'),
-                      NavigationDestination(
-                          icon: Icon(Icons.person), label: 'Account'),
-                    ],
-                  ),
-                ),
+      ),
     );
   }
 }
@@ -196,16 +218,28 @@ class _AccountTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Account')),
+      appBar: AppBar(title: Text(t('account_title'))),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text(baseUrl, style: const TextStyle(color: Colors.grey)),
-          const Text('DB: odoo',
-              style: TextStyle(color: Colors.grey)),
+          Text(t('account_db'),
+              style: const TextStyle(color: Colors.grey)),
           const SizedBox(height: 8),
-          Text('User: ${user.isEmpty ? '—' : user}',
+          Text(
+              user.isEmpty
+                  ? t('account_user_none')
+                  : Lang.instance.f('account_user', {'user': user}),
               style: const TextStyle(fontSize: 18)),
+          const SizedBox(height: 16),
+          Text(t('account_language'),
+              style: const TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const LangSwitch(),
+          const SizedBox(height: 4),
+          Text(t('account_language_note'),
+              style: const TextStyle(color: Colors.grey)),
           const SizedBox(height: 24),
           SizedBox(
             height: 52,
@@ -213,13 +247,13 @@ class _AccountTab extends StatelessWidget {
               onPressed: () async {
                 await onLogout();
               },
-              child: const Text('Sign out'),
+              child: Text(t('account_signout')),
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'POC build. Online-only. Mistakes: fix in Odoo backend.',
-            style: TextStyle(color: Colors.grey),
+          Text(
+            t('account_note'),
+            style: const TextStyle(color: Colors.grey),
           ),
         ],
       ),

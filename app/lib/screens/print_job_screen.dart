@@ -5,14 +5,15 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../i18n/lang.dart';
 import '../print/label_model.dart';
 import '../print/print_job.dart';
 import '../widgets/label_preview.dart';
 
 class PrintJobScreen extends StatefulWidget {
   final List<LabelModel> models;
-  final String title;
-  const PrintJobScreen({super.key, required this.models, this.title = 'Printing'});
+  final String? title;
+  const PrintJobScreen({super.key, required this.models, this.title});
 
   @override
   State<PrintJobScreen> createState() => _PrintJobScreenState();
@@ -67,10 +68,11 @@ class _PrintJobScreenState extends State<PrintJobScreen> {
     final failed = _job.failedCount;
     return Scaffold(
       appBar: AppBar(
-        title: Text('${widget.title} ($done/$total)'),
+        title: Text(
+            '${widget.title ?? t('batch_job_title')} ($done/$total)'),
         leading: IconButton(
           icon: const Icon(Icons.close),
-          tooltip: 'Close',
+          tooltip: t('job_close'),
           onPressed: () {
             if (_job.isRunning) _job.cancel();
             Navigator.of(context).pop();
@@ -87,10 +89,20 @@ class _PrintJobScreenState extends State<PrintJobScreen> {
                 Expanded(
                   child: Text(
                     _job.isFinished
-                        ? 'Done: $done printed${failed > 0 ? ', $failed failed' : ''}'
+                        ? (failed > 0
+                            ? Lang.instance.f('job_done_fail', {
+                                'done': '$done',
+                                'failed': '$failed'
+                              })
+                            : Lang.instance
+                                .f('job_done', {'done': '$done'}))
                         : _job.isPaused
-                            ? 'Paused${failed > 0 ? ' — $failed failed (reload paper / check printer)' : ''}'
-                            : 'Printing… $done/$total',
+                            ? (failed > 0
+                                ? Lang.instance.f(
+                                    'job_paused_fail', {'failed': '$failed'})
+                                : t('job_paused'))
+                            : Lang.instance.f('job_printing',
+                                {'done': '$done', 'total': '$total'}),
                   ),
                 ),
               ],
@@ -103,15 +115,16 @@ class _PrintJobScreenState extends State<PrintJobScreen> {
               children: [
                 if (!_job.isPaused && _job.isRunning)
                   OutlinedButton(
-                      onPressed: _job.pause, child: const Text('Pause')),
+                      onPressed: _job.pause,
+                      child: Text(t('job_pause'))),
                 if (_job.isPaused && !_job.isFinished)
                   FilledButton(
                       onPressed: () => _job.resume(),
-                      child: const Text('Resume')),
+                      child: Text(t('job_resume'))),
                 if (!_job.isFinished)
                   TextButton(
                       onPressed: () => _job.cancel(),
-                      child: const Text('Cancel')),
+                      child: Text(t('job_cancel'))),
                 if (failed > 0)
                   FilledButton.tonal(
                     onPressed: _job.isRunning
@@ -119,8 +132,10 @@ class _PrintJobScreenState extends State<PrintJobScreen> {
                         : () => _job.retryFailed(
                             _retrySel.isEmpty ? null : Set.of(_retrySel)),
                     child: Text(_retrySel.isEmpty
-                        ? 'Retry failed ($failed)'
-                        : 'Retry selected (${_retrySel.length})'),
+                        ? Lang.instance.f(
+                            'job_retry_failed', {'n': '$failed'})
+                        : Lang.instance.f('job_retry_selected',
+                            {'n': '${_retrySel.length}'})),
                   ),
               ],
             ),
@@ -128,7 +143,7 @@ class _PrintJobScreenState extends State<PrintJobScreen> {
           const Divider(),
           Expanded(
             child: total == 0
-                ? const Center(child: Text('Nothing to print.'))
+                ? Center(child: Text(t('job_empty')))
                 : ListView.builder(
                     itemCount: total,
                     itemBuilder: (_, i) {
@@ -178,7 +193,19 @@ class _PrintJobScreenState extends State<PrintJobScreen> {
                                           style: const TextStyle(
                                               color: Colors.red,
                                               fontSize: 12)),
-                                    Text(jl.status.name,
+                                    Text(
+                                        t({
+                                          LabelPrintStatus.queued:
+                                              'job_st_queued',
+                                          LabelPrintStatus.printing:
+                                              'job_st_printing',
+                                          LabelPrintStatus.done:
+                                              'job_st_done',
+                                          LabelPrintStatus.failed:
+                                              'job_st_failed',
+                                          LabelPrintStatus.cancelled:
+                                              'job_st_cancelled',
+                                        }[jl.status]!),
                                         style: const TextStyle(
                                             color: Colors.grey,
                                             fontSize: 12)),
