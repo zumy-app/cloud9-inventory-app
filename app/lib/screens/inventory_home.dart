@@ -3,6 +3,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../i18n/lang.dart';
 import '../odoo_client.dart';
 import 'add_item.dart';
 import 'browse.dart';
@@ -20,28 +21,28 @@ class InventoryHome extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Inventory')),
+      appBar: AppBar(title: Text(t('home_title'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Center(child: Image.asset('assets/logo.png', height: 84)),
           const SizedBox(height: 12),
-          const Text('What are you doing?',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(t('home_prompt'),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           _tile(
             context,
             icon: Icons.add_box,
-            title: 'Add inventory',
-            subtitle: 'New product, incl. expiry date',
+            title: t('home_add'),
+            subtitle: t('home_add_sub'),
             onTap: () =>
                 _go(context, AddItemScreen(client: client, user: user)),
           ),
           _tile(
             context,
             icon: Icons.edit,
-            title: 'Manage inventory',
-            subtitle: 'Find an item, fix its details',
+            title: t('home_manage'),
+            subtitle: t('home_manage_sub'),
             onTap: () => _go(
                 context,
                 BrowseScreen(
@@ -52,22 +53,9 @@ class InventoryHome extends StatelessWidget {
           ),
           _tile(
             context,
-            icon: Icons.list_alt,
-            title: 'View inventory',
-            subtitle: 'Search or browse by category',
-            onTap: () => _go(
-                context,
-                BrowseScreen(
-                    client: client,
-                    user: user,
-                    editable: false,
-                    title: 'View inventory')),
-          ),
-          _tile(
-            context,
             icon: Icons.qr_code_scanner,
-            title: 'Update item count',
-            subtitle: 'Scan, set quantity, next',
+            title: t('home_count'),
+            subtitle: t('home_count_sub'),
             onTap: () => _go(
                 context,
                 ReceiveScreen(

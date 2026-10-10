@@ -1,6 +1,8 @@
 // Continuous scan sheet: stays open, rapid qty capture.
-// Qty auto-saves; touched price/SKU/category text never auto-persists —
-// scanning away with dirty text prompts Save / Discard first.
+// Receive: qty auto-saves on scan-away. Count: every write needs the
+// before → after confirm first — no silent absolute writes.
+// Every outcome ends in the result banner (success green, failure red);
+// touched price/SKU/category text never auto-persists.
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../audit_log.dart';
+import '../i18n/lang.dart';
 import '../odoo_client.dart';
 
 class ScanSheet extends StatefulWidget {
@@ -51,6 +54,20 @@ class _ScanSheetState extends State<ScanSheet> {
   int _scans = 0;
   String _lastCode = '';
   DateTime _lastTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Last save outcome, shown as a persistent banner so every workflow ends
+  // with visible success/failure feedback (not just a beep + counter).
+  String? _lastResult;
+  bool _lastOk = true;
+
+  void _say(String msg, {bool ok = true}) {
+    if (!mounted) return;
+    setState(() {
+      _lastResult = msg;
+      _lastOk = ok;
+      _err = null;
+    });
+  }
 
   InventoryProduct? _pending;
   bool _textDirty = false;
@@ -101,6 +118,42 @@ class _ScanSheetState extends State<ScanSheet> {
     }
   }
 
+  Future<void> _retryCamera() async {
+    try {
+      await _controller.start();
+    } catch (_) {
+      // Failures surface via errorBuilder; nothing to do here.
+    }
+  }
+
+  Widget _errorFallback(BuildContext context, MobileScannerException error) {
+    final denied = error.errorCode == MobileScannerErrorCode.permissionDenied;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.videocam_off, size: 40),
+            const SizedBox(height: 8),
+            Text(
+              denied
+                  ? t('sheet_cam_denied')
+                  : Lang.instance.f('sheet_cam_fail',
+                      {'err': error.errorCode.message}),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: _retryCamera,
+              child: Text(t('sheet_retry_cam')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _load(String code) async {
     setState(() {
       _busy = true;
@@ -110,12 +163,12 @@ class _ScanSheetState extends State<ScanSheet> {
       final rows = await widget.client.findVariants(code);
       if (!mounted) return;
       if (rows.isEmpty) {
-        setState(() => _err = 'Not in Odoo: $code — create it in single mode.');
+        setState(() => _err =
+            Lang.instance.f('sheet_not_found', {'code': code}));
         return;
       }
       if (rows.length > 1) {
-        setState(() =>
-            _err = 'Duplicate barcode — pick the variant in single mode.');
+        setState(() => _err = t('sheet_dup'));
         return;
       }
       setState(() {
@@ -127,8 +180,9 @@ class _ScanSheetState extends State<ScanSheet> {
       setState(() => _scans++);
     } on OdooException catch (e) {
       if (mounted) {
-        setState(() => _err =
-            e.message == 'SESSION_EXPIRED' ? 'Session expired — sign in again.' : e.message);
+        setState(() => _err = e.message == 'SESSION_EXPIRED'
+            ? t('sheet_session')
+            : e.message);
       }
     } catch (e) {
       if (mounted) setState(() => _err = e.toString());
@@ -160,15 +214,45 @@ class _ScanSheetState extends State<ScanSheet> {
         _pending = null;
         _qty.text = '1';
       });
+      _say(Lang.instance.f('recv_saved', {
+        'name': p.name,
+        'qty': '1',
+        'after': after.toStringAsFixed(0)
+      }));
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      _say(e.message, ok: false);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  /// Before → after confirm for continuous counts (same rule as single
+  /// mode). Factored out so no BuildContext crosses an async gap.
+  Future<bool> _confirmCount(InventoryProduct p, double qty) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(t('recv_confirm_count')),
+        content: Text(
+            '${p.name}\n${p.qtyAvailable.toStringAsFixed(0)} → ${qty.toStringAsFixed(0)}'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('recv_cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(t('recv_confirm'))),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   /// Save pending qty (qty only — never text fields) before moving on.
-  /// Returns false when blocked by a dirty-text prompt the user cancelled.
+  /// Count mode always shows the before → after confirm first (same rule as
+  /// single mode) — no silent absolute writes. Every outcome ends in the
+  /// result banner. Returns false when blocked/cancelled: the caller must
+  /// stay on the pending item.
   Future<bool> _ensurePendingSaved() async {
     final p = _pending;
     if (p == null) return true;
@@ -176,15 +260,16 @@ class _ScanSheetState extends State<ScanSheet> {
       final choice = await showDialog<String>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('Unsaved edits'),
-          content: Text('${p.name} has unconfirmed price/detail edits.'),
+          title: Text(t('sheet_unsaved')),
+          content: Text(Lang.instance
+              .f('sheet_unsaved_msg', {'name': p.name})),
           actions: [
             TextButton(
                 onPressed: () => Navigator.of(context).pop('discard'),
-                child: const Text('Discard')),
+                child: Text(t('sheet_discard'))),
             FilledButton(
                 onPressed: () => Navigator.of(context).pop('single'),
-                child: const Text('Edit in single mode')),
+                child: Text(t('sheet_edit_single'))),
           ],
         ),
       );
@@ -196,19 +281,27 @@ class _ScanSheetState extends State<ScanSheet> {
       if (mounted) setState(() => _textDirty = false);
     }
     final qty = double.tryParse(_qty.text.trim()) ?? double.nan;
-    if (qty.isNaN || qty < 1) {
-      if (mounted) {
-        setState(() => _err = 'Pending ${_pending!.name} has invalid qty — fix or clear it.');
-      }
+    // Count is absolute (0 allowed, like single mode); receive adds (≥ 1).
+    final minQty = _isCount ? 0.0 : 1.0;
+    if (qty.isNaN || qty < minQty) {
+      _say(Lang.instance.f(
+          _isCount ? 'sheet_invalid_count' : 'sheet_invalid_receive',
+          {'name': p.name}));
       return false;
+    }
+    if (_isCount) {
+      final confirmed = await _confirmCount(p, qty);
+      if (!confirmed || !mounted) return false;
     }
     setState(() => _busy = true);
     try {
+      final before = p.qtyAvailable;
       final after = _isCount
           ? await widget.client.setStock(p, qty)
           : await widget.client.addStock(p, qty);
-      _audit(p, 'qty', p.qtyAvailable.toStringAsFixed(0),
-          after.toStringAsFixed(0), 'continuous');
+      _audit(p, 'qty', before.toStringAsFixed(0), after.toStringAsFixed(0),
+          'continuous');
+      _beep();
       if (!mounted) return false;
       setState(() {
         _scans++;
@@ -216,9 +309,24 @@ class _ScanSheetState extends State<ScanSheet> {
         _qty.text = '1';
         _textDirty = false;
       });
+      _say(_isCount
+          ? Lang.instance.f('recv_counted', {
+              'name': p.name,
+              'after': after.toStringAsFixed(0)
+            })
+          : Lang.instance.f('recv_saved', {
+              'name': p.name,
+              'qty': qty.toStringAsFixed(0),
+              'after': after.toStringAsFixed(0)
+            }));
       return true;
     } on OdooException catch (e) {
-      if (mounted) setState(() => _err = e.message);
+      _say(
+          e.message == 'SESSION_EXPIRED' ? t('sheet_session') : e.message,
+          ok: false);
+      return false;
+    } catch (e) {
+      _say(e.toString(), ok: false);
       return false;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -240,10 +348,36 @@ class _ScanSheetState extends State<ScanSheet> {
     ));
   }
 
+  /// Leaving with a pending item ends the workflow with an explicit
+  /// choice — save (with the count confirm when in count mode), discard,
+  /// or stay. Nothing is silently dropped.
   Future<void> _exit() async {
-    if (_pending != null && _textDirty) {
-      final ok = await _ensurePendingSaved();
-      if (!ok) return;
+    final p = _pending;
+    if (p != null) {
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(t('sheet_leave')),
+          content: Text(Lang.instance
+              .f('sheet_leave_msg', {'name': p.name})),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop('stay'),
+                child: Text(t('sheet_stay'))),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop('discard'),
+                child: Text(t('sheet_discard'))),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop('save'),
+                child: Text(t('sheet_save_exit'))),
+          ],
+        ),
+      );
+      if (choice == null || choice == 'stay' || !mounted) return;
+      if (choice == 'save') {
+        final ok = await _ensurePendingSaved();
+        if (!ok) return;
+      }
     }
     if (mounted) Navigator.of(context).pop();
   }
@@ -254,14 +388,15 @@ class _ScanSheetState extends State<ScanSheet> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          tooltip: 'Exit',
+          tooltip: t('sheet_exit'),
           icon: const Icon(Icons.close),
           onPressed: _exit,
         ),
-        title: Text('Continuous ($_scans)'),
+        title: Text(
+            '${_isCount ? t('sheet_count') : t('sheet_receive')} ${t('sheet_continuous')} ($_scans)'),
         actions: [
           IconButton(
-            tooltip: 'Torch',
+            tooltip: t('sheet_torch'),
             icon: Icon(_torch ? Icons.flash_on : Icons.flash_off),
             onPressed: () async {
               await _controller.toggleTorch();
@@ -277,6 +412,7 @@ class _ScanSheetState extends State<ScanSheet> {
             child: MobileScanner(
               controller: _controller,
               onDetect: _onDetect,
+              errorBuilder: _errorFallback,
             ),
           ),
           Padding(
@@ -286,9 +422,9 @@ class _ScanSheetState extends State<ScanSheet> {
                 Expanded(
                   child: TextField(
                     controller: _manual,
-                    decoration: const InputDecoration(
-                        labelText: 'Type barcode + Go',
-                        border: OutlineInputBorder()),
+                    decoration: InputDecoration(
+                        labelText: t('sheet_type_go'),
+                        border: const OutlineInputBorder()),
                     textInputAction: TextInputAction.go,
                     onSubmitted: (v) {
                       _manual.clear();
@@ -304,6 +440,30 @@ class _ScanSheetState extends State<ScanSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(_err!,
                   style: const TextStyle(color: Colors.red)),
+            ),
+          if (_lastResult != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: Card(
+                color: _lastOk
+                    ? Colors.green.shade50
+                    : Colors.red.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _lastOk
+                            ? Icons.check_circle
+                            : Icons.error,
+                        color: _lastOk ? Colors.green : Colors.red,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(_lastResult!)),
+                    ],
+                  ),
+                ),
+              ),
             ),
           if (p != null)
             Expanded(
@@ -321,7 +481,7 @@ class _ScanSheetState extends State<ScanSheet> {
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold)),
                           Text(
-                              'On-hand: ${p.qtyAvailable.toStringAsFixed(0)} • \$${p.listPrice.toStringAsFixed(2)}'),
+                              '${Lang.instance.f('browse_onhand', {'qty': p.qtyAvailable.toStringAsFixed(0)})} • \$${p.listPrice.toStringAsFixed(2)}'),
                           const SizedBox(height: 8),
                           Row(
                             children: [
@@ -344,8 +504,8 @@ class _ScanSheetState extends State<ScanSheet> {
                                       const TextInputType.numberWithOptions(),
                                   decoration: InputDecoration(
                                       labelText: _isCount
-                                          ? 'Counted'
-                                          : 'Qty',
+                                          ? t('sheet_counted')
+                                          : t('sheet_qty'),
                                       border: const OutlineInputBorder()),
                                 ),
                               ),
@@ -368,7 +528,9 @@ class _ScanSheetState extends State<ScanSheet> {
                               Expanded(
                                 child: FilledButton(
                                   onPressed: _busy ? null : _quickPlusOne,
-                                  child: Text(_isCount ? '+1' : '+1 save'),
+                                  child: Text(_isCount
+                                      ? t('sheet_plus1')
+                                      : t('sheet_plus1_save')),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -376,20 +538,10 @@ class _ScanSheetState extends State<ScanSheet> {
                                 child: OutlinedButton(
                                   onPressed: _busy
                                       ? null
-                                      : () async {
-                                          final messenger =
-                                              ScaffoldMessenger.of(context);
-                                          final ok =
-                                              await _ensurePendingSaved();
-                                          if (ok && mounted) {
-                                            messenger.showSnackBar(SnackBar(
-                                                content: Text(
-                                                    'Saved ${p.name}')));
-                                          }
-                                        },
+                                      : () => _ensurePendingSaved(),
                                   child: Text(_isCount
-                                      ? 'Set count'
-                                      : 'Save qty'),
+                                      ? t('recv_setcount')
+                                      : t('sheet_save_qty')),
                                 ),
                               ),
                             ],
@@ -401,12 +553,11 @@ class _ScanSheetState extends State<ScanSheet> {
                                 setState(() => _textDirty = true);
                                 Navigator.of(context).pop();
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
+                                    SnackBar(
                                         content: Text(
-                                            'Price/detail edits: use single mode')));
+                                            t('sheet_price_single'))));
                               },
-                              child: const Text(
-                                  'Edit price/details (single mode)'),
+                              child: Text(t('sheet_edit_price')),
                             ),
                           ),
                         ],
@@ -417,9 +568,9 @@ class _ScanSheetState extends State<ScanSheet> {
               ),
             )
           else
-            const Expanded(
+            Expanded(
               child: Center(
-                  child: Text('Point at a barcode — beep means captured.',
+                  child: Text(t('sheet_point'),
                       textAlign: TextAlign.center)),
             ),
         ],

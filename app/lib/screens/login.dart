@@ -3,8 +3,10 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../i18n/lang.dart';
 import '../odoo_client.dart';
 import '../session_store.dart';
+import '../widgets/lang_switch.dart';
 
 class LoginScreen extends StatefulWidget {
   final OdooClient client;
@@ -16,11 +18,23 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const _db = 'odoo';
   final _user = TextEditingController();
   final _pass = TextEditingController();
   bool _busy = false;
   String? _err;
   bool _obscure = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill the last username so a rare manual re-login is one field.
+    SessionStore.loadCredentials().then((c) {
+      if (mounted && c != null && _user.text.isEmpty) {
+        setState(() => _user.text = c.login);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -36,13 +50,17 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await widget.client.authenticate(
-        db: 'odoo',
+        db: _db,
         login: _user.text.trim(),
         password: _pass.text,
       );
       final cookie = widget.client.sessionCookie;
       if (cookie == null) throw OdooException('No session cookie');
       await SessionStore.saveSession(cookie, _user.text.trim());
+      // Stored in secure storage: enables one transparent re-login on 401
+      // so an expired session never wipes an in-progress form.
+      await SessionStore.saveCredentials(
+          db: _db, login: _user.text.trim(), password: _pass.text);
       widget.onLoggedIn();
     } on OdooException catch (e) {
       setState(() => _err = e.message);
@@ -56,7 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Cloud 9 Inventory')),
+      appBar: AppBar(title: Text(t('login_title'))),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -71,8 +89,9 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: _user,
-                decoration: const InputDecoration(
-                    labelText: 'Username', border: OutlineInputBorder()),
+                decoration: InputDecoration(
+                    labelText: t('login_username'),
+                    border: const OutlineInputBorder()),
                 autocorrect: false,
               ),
               const SizedBox(height: 12),
@@ -80,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 controller: _pass,
                 obscureText: _obscure,
                 decoration: InputDecoration(
-                  labelText: 'Password',
+                  labelText: t('login_password'),
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
                     icon: Icon(
@@ -105,9 +124,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           width: 22,
                           height: 22,
                           child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Sign in', style: TextStyle(fontSize: 18)),
+                      : Text(t('login_signin'),
+                          style: const TextStyle(fontSize: 18)),
                 ),
               ),
+              const SizedBox(height: 16),
+              const Center(child: LangSwitch(compact: true)),
             ],
           ),
         ),

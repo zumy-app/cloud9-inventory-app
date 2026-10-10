@@ -1,0 +1,435 @@
+<!DOCTYPE html><html class="h-full" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Cloud 9 Print Utility - Thermal Shelf Edge Signage Studio</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700&amp;family=Space+Grotesk:wght@400;500;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-tertiary-fixed": "#1b1b1b",
+            "on-secondary-fixed": "#0c1a39",
+            "secondary-fixed": "#d9e2ff",
+            "on-background": "#1a1c1c",
+            "surface-container-highest": "#e2e2e2",
+            "tertiary-fixed": "#e2e2e2",
+            "secondary-container": "#c9d7fe",
+            "primary-fixed-dim": "#ffb694",
+            "surface-variant": "#e2e2e2",
+            "secondary-fixed-dim": "#b9c6ed",
+            "on-surface": "#1a1c1c",
+            "on-secondary": "#ffffff",
+            "on-surface-variant": "#5a4136",
+            "surface-container-high": "#e8e8e8",
+            "surface-container-lowest": "#ffffff",
+            "on-error": "#ffffff",
+            "on-tertiary": "#ffffff",
+            "on-tertiary-container": "#303030",
+            "on-primary-fixed": "#351000",
+            "surface-container": "#eeeeee",
+            "on-tertiary-fixed-variant": "#474747",
+            "surface-dim": "#dadada",
+            "on-primary-fixed-variant": "#7b2f00",
+            "outline": "#8e7164",
+            "primary": "#a14000",
+            "error": "#ba1a1a",
+            "outline-variant": "#e2bfb0",
+            "inverse-primary": "#ffb694",
+            "error-container": "#ffdad6",
+            "tertiary-fixed-dim": "#c6c6c6",
+            "inverse-surface": "#2f3131",
+            "surface-container-low": "#f3f3f4",
+            "primary-container": "#ff6a00",
+            "on-error-container": "#93000a",
+            "secondary": "#515e7f",
+            "on-secondary-fixed-variant": "#394666",
+            "on-primary": "#ffffff",
+            "tertiary-container": "#989898",
+            "background": "#f9f9f9",
+            "primary-fixed": "#ffdbcc",
+            "on-secondary-container": "#505d7e",
+            "on-primary-container": "#571f00",
+            "surface-tint": "#a14000",
+            "inverse-on-surface": "#f0f1f1",
+            "surface": "#f9f9f9",
+            "tertiary": "#5e5e5e",
+            "surface-bright": "#f9f9f9"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "gutter": "0.0625rem",
+            "space-md": "0.125rem",
+            "space-xs": "0.03125rem",
+            "space-lg": "0.1875rem",
+            "space-sm": "0.0625rem",
+            "space-xl": "0.25rem",
+            "margin": "0.09375rem"
+          },
+          "fontFamily": {
+            "price-hero": ["Barlow Condensed"],
+            "badge-label": ["Barlow Condensed"],
+            "price-cents": ["Barlow Condensed"],
+            "barcode-numeral": ["Space Mono"],
+            "product-title": ["Barlow Condensed"],
+            "price-unit": ["Space Mono"],
+            "metadata-micro": ["Space Mono"],
+            "product-subtitle": ["Space Grotesk"]
+          },
+          "fontSize": {
+            "price-hero": ["34px", { "lineHeight": "32px", "letterSpacing": "-0.03em", "fontWeight": "800" }],
+            "badge-label": ["9px", { "lineHeight": "10px", "letterSpacing": "0.05em", "fontWeight": "800" }],
+            "price-cents": ["18px", { "lineHeight": "18px", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "barcode-numeral": ["8px", { "lineHeight": "9px", "letterSpacing": "0.08em", "fontWeight": "400" }],
+            "product-title": ["12px", { "lineHeight": "13px", "letterSpacing": "0.01em", "fontWeight": "700" }],
+            "price-unit": ["8px", { "lineHeight": "10px", "letterSpacing": "0em", "fontWeight": "700" }],
+            "metadata-micro": ["6px", { "lineHeight": "7px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+            "product-subtitle": ["8px", { "lineHeight": "9px", "letterSpacing": "0.02em", "fontWeight": "500" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+      font-size: 16px;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    
+    /* Strict 2"x1" physical 203 DPI raster footprint: exactly 406px by 203px */
+    .thermal-tag-canvas {
+      width: 406px;
+      height: 203px;
+      min-width: 406px;
+      min-height: 203px;
+      max-width: 406px;
+      max-height: 203px;
+      box-sizing: border-box;
+      position: relative;
+      background: #ffffff;
+      color: #000000;
+      overflow: hidden;
+      image-rendering: pixelated;
+    }
+
+    /* 1-Bit Thermal Simulation Mode (Zero antialiasing, stark black & white) */
+    .mode-thermal .thermal-tag-canvas {
+      filter: contrast(300%) grayscale(100%);
+    }
+
+    .mode-thermal .thermal-logo-img {
+      filter: grayscale(100%) contrast(1000%) brightness(0);
+    }
+
+    /* Shelf channel simulation perspective */
+    .shelf-rail {
+      background: linear-gradient(180deg, #18191c 0%, #0d0e10 40%, #1c1d22 50%, #08080a 100%);
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.8), 0 4px 12px rgba(0,0,0,0.3);
+    }
+    
+    .barcode-strip {
+      background-repeat: repeat-x;
+      background-size: contain;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-surface antialiased min-h-screen flex flex-col font-product-subtitle selection:bg-primary-container selection:text-on-primary">
+<!-- ========================================== -->
+<!-- TOP APP BAR (Mandatory Shared Component)  -->
+<!-- ========================================== -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-space-xl h-10 border-b border-on-surface dark:border-outline bg-surface-container-lowest dark:bg-inverse-surface shadow-none">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-primary-container dark:text-inverse-primary" data-icon="print">print</span>
+<span class="font-product-title text-product-title font-bold text-on-surface dark:text-inverse-on-surface tracking-wider">Cloud 9 Print Utility</span>
+<span class="hidden md:inline-block bg-primary-container text-on-primary px-1.5 py-0.5 text-[9px] font-metadata-micro uppercase tracking-widest font-bold">203 DPI / 8 dpmm Direct Thermal</span>
+</div>
+<div class="flex items-center space-x-4">
+<div class="flex items-center border border-on-surface bg-surface-container-low px-2 py-0.5 text-xs font-metadata-micro">
+<span class="inline-block w-2 h-2 rounded-full bg-emerald-600 mr-1.5 animate-pulse"></span>
+<span class="text-on-surface font-bold tracking-tight uppercase">ZEBRA ZD420 [READY]</span>
+</div>
+<button class="hover:bg-surface-container dark:hover:bg-inverse-surface hover:text-primary-container p-1 active:translate-y-px transition-none" title="Print Config">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</div>
+</header>
+<!-- ========================================== -->
+<!-- MAIN WORKSPACE & INSPECTION CANVAS        -->
+<!-- ========================================== -->
+<main class="flex-1 pt-12 pb-16 px-4 md:px-8 max-w-[1600px] mx-auto w-full">
+<!-- Sub-header & Live Quick Controller Bar -->
+<section class="mt-2 mb-6 border border-on-surface bg-surface-container-lowest p-3 shadow-none">
+<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+<!-- Left Title and Description -->
+<div>
+<div class="flex items-center gap-2">
+<span class="font-product-title text-xl font-bold uppercase tracking-wide text-on-surface">2.00" × 1.00" Shelf Edge Matrix Showcase</span>
+<span class="bg-surface-container-highest text-on-surface text-[10px] font-metadata-micro px-2 py-0.5 border border-outline">406 × 203 DOTS</span>
+</div>
+<p class="font-metadata-micro text-xs text-on-surface-variant mt-0.5">
+            Real-size 1-Bit direct thermal output spec for Cloud 9 Kitchen &amp; Market shelf rails. 100% compliant with GS1 quiet zones.
+          </p>
+</div>
+<!-- Mode & Render Controls -->
+<div class="flex flex-wrap items-center gap-3">
+<!-- Live Preview Mode Switcher -->
+<div class="inline-flex border border-on-surface bg-surface-container-low p-0.5">
+<button class="px-3 py-1 font-metadata-micro text-xs font-bold uppercase bg-on-surface text-surface-container-lowest transition-none flex items-center gap-1" id="toggle-thermal-btn" onclick="setRenderMode('thermal')">
+<span class="material-symbols-outlined text-xs" data-icon="contrast">contrast</span> 1-Bit Thermal Print
+            </button>
+<button class="px-3 py-1 font-metadata-micro text-xs font-bold uppercase text-on-surface hover:bg-surface-container transition-none flex items-center gap-1" id="toggle-color-btn" onclick="setRenderMode('color')">
+<span class="material-symbols-outlined text-xs" data-icon="palette">palette</span> Color Digital Proof
+            </button>
+</div>
+<!-- Quick Action Buttons -->
+<button class="px-3 py-1.5 bg-primary-container text-on-primary font-product-title text-sm font-bold uppercase tracking-wider border border-on-primary-container hover:bg-primary transition-none flex items-center gap-1" onclick="triggerPrintTest()">
+<span class="material-symbols-outlined text-sm" data-icon="receipt_long">receipt_long</span> Batch Print (4)
+          </button>
+<button class="px-3 py-1.5 bg-surface-container text-on-surface font-metadata-micro text-xs font-bold uppercase border border-on-surface hover:bg-surface-container-high transition-none flex items-center gap-1" onclick="copyZplCode()">
+<span class="material-symbols-outlined text-xs" data-icon="code">code</span> Copy ZPL II
+          </button>
+</div>
+</div>
+<!-- Live Dynamic Input Sync Strip -->
+<div class="mt-3 pt-3 border-t border-surface-container-highest grid grid-cols-1 md:grid-cols-4 gap-3 bg-surface-container-low p-2">
+<div>
+<label class="block font-metadata-micro text-[10px] text-on-surface-variant uppercase font-bold">Sync Product Title</label>
+<input class="w-full bg-surface-container-lowest border border-on-surface px-2 py-1 text-xs font-product-title font-bold focus:outline-none focus:border-primary-container" id="live-product-name" oninput="syncFields()" type="text" value="C9 ARTISAN ROAST TURKEY CLUB WRAP">
+</div>
+<div>
+<label class="block font-metadata-micro text-[10px] text-on-surface-variant uppercase font-bold">Sync Price ($ / Hero)</label>
+<div class="flex gap-1">
+<input class="w-16 bg-surface-container-lowest border border-on-surface px-2 py-1 text-xs font-price-hero font-bold focus:outline-none text-center" id="live-price-dollar" oninput="syncFields()" type="text" value="7">
+<input class="w-16 bg-surface-container-lowest border border-on-surface px-2 py-1 text-xs font-price-hero font-bold focus:outline-none text-center" id="live-price-cents" oninput="syncFields()" type="text" value="49">
+<input class="flex-1 bg-surface-container-lowest border border-on-surface px-2 py-1 text-xs font-metadata-micro focus:outline-none" id="live-unit-price" oninput="syncFields()" type="text" value="$0.62 / OZ">
+</div>
+</div>
+<div>
+<label class="block font-metadata-micro text-[10px] text-on-surface-variant uppercase font-bold">Location / Department</label>
+<input class="w-full bg-surface-container-lowest border border-on-surface px-2 py-1 text-xs font-metadata-micro focus:outline-none" id="live-shelf-loc" oninput="syncFields()" type="text" value="AISLE 04-B2 • DELI FRESH">
+</div>
+<div>
+<label class="block font-metadata-micro text-[10px] text-on-surface-variant uppercase font-bold">Barcode Digits (UPC-A)</label>
+<input class="w-full bg-surface-container-lowest border border-on-surface px-2 py-1 text-xs font-barcode-numeral focus:outline-none" id="live-barcode-val" oninput="syncFields()" type="text" value="0 48192 73019 4">
+</div>
+</div>
+</section>
+<!-- ========================================== -->
+<!-- 4-TAG COMPARISON GRID                      -->
+<!-- ========================================== -->
+<div class="mode-thermal grid grid-cols-1 xl:grid-cols-2 gap-6" id="labels-container">
+<!-- ========================================================= -->
+<!-- CARD 1: STANDARD RETAIL EVERYDAY TAG                      -->
+<!-- ========================================================= -->
+<div class="border border-on-surface bg-surface-container-lowest p-4">
+<div class="flex items-center justify-between pb-2 mb-3 border-b border-on-surface">
+<div class="flex items-center gap-2">
+<span class="bg-on-surface text-surface-container-lowest font-metadata-micro px-2 py-0.5 font-bold uppercase">TYPE 01</span>
+<h2 class="font-product-title text-base font-bold uppercase tracking-wide">Standard Retail Everyday</h2>
+</div>
+<span class="font-metadata-micro text-xs text-on-surface-variant">FORMAT: 2.00" × 1.00" [406×203 PX]</span>
+</div>
+<div class="flex flex-col items-center justify-center p-4 bg-surface-container-high border border-outline border-dashed">
+<!-- PHYSICAL LABEL CONTAINER (Strict 406px x 203px) -->
+<div class="thermal-tag-canvas border-2 border-black flex flex-col justify-between p-2"><div class="flex justify-between items-center pb-1 border-b-2 border-black bg-white"><div class="flex items-center gap-2"><img alt="Cloud 9 Kitchen &amp; Market" class="thermal-logo-img h-10 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_AuDh3aLm6uwjCxAftBz-TvALCIuy1PYqfT-MllDi9bhRwHffTpIY9E2NxYyDyshzf0jXYrDljaLgpHxTcYAwG2ow435EFypa4BIa60X_mQobJ5vzIq2YVsRug4PuQq-E2a_8AndR2IY002eMg1ulgewhjtxye_-s5pQCE1b9zKWcwhzkXHWRXfeuFbpPYYjK22gCEP8xpZ2n22d6yNXHwZjy7Xmpju6-1WlScYLkiPw95Zx6fQG6pA"><div class="border-l border-black pl-1.5 leading-tight"><span class="font-metadata-micro text-[8px] text-black font-bold uppercase block">MK-203D</span><span class="font-metadata-micro text-[7px] text-black font-bold uppercase block">ST-084</span></div></div><div class="text-right"><span class="dynamic-shelf font-metadata-micro text-[9px] font-bold text-black uppercase tracking-tight block">AISLE 04-B2 • DELI FRESH</span><div class="flex items-center justify-end gap-1"><span class="bg-black text-white font-metadata-micro text-[7px] px-1 font-bold">VERIF: 10/24</span><span class="font-metadata-micro text-[7px] text-black font-bold">C9-GROC</span></div></div></div><div class="py-1 border-b border-black"><h3 class="dynamic-title font-product-title text-[18px] leading-[18px] font-black uppercase text-black line-clamp-1 tracking-tight">C9 ARTISAN ROAST TURKEY CLUB WRAP</h3><div class="flex justify-between items-center mt-0.5 font-product-subtitle text-[8px] text-black font-bold"><span class="tracking-tight">12.4 OZ (351g) • CONTAINS GLUTEN/DAIRY</span><span class="font-metadata-micro text-[7px] bg-neutral-200 px-1 border border-black uppercase font-bold">TAXABLE</span></div></div><div class="flex-1 flex items-stretch justify-between pt-1 gap-1"><div class="w-[48%] flex flex-col justify-between pr-1"><div class="w-full h-10 flex items-end justify-center space-x-[1.5px] px-0.5 bg-white overflow-hidden border-b border-black pb-0.5"><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[4px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[4px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span></div><div class="dynamic-barcode font-barcode-numeral text-[9px] text-center tracking-widest text-black font-bold mt-0.5">0 48192 73019 4</div><div class="w-full mt-1 border-2 border-black px-1.5 py-0.5 flex justify-between items-center bg-black text-white"><span class="font-metadata-micro text-[7px] uppercase font-bold tracking-wider">UNIT PRICE:</span><span class="dynamic-unit font-price-unit text-[9px] font-black">$0.62 / OZ</span></div></div><div class="w-[52%] flex flex-col justify-between items-end pl-1 border-l-2 border-black"><div class="w-full flex items-center justify-between border-b border-black pb-0.5"><span class="font-badge-label text-[9px] uppercase font-black text-white bg-black px-1.5 py-0.5 text-center leading-none tracking-widest">EVERYDAY RETAIL</span><span class="font-metadata-micro text-[8px] font-bold text-black">DEPT 04</span></div><div class="w-full flex items-start justify-end leading-none py-0.5"><span class="font-price-hero text-[26px] font-black text-black pt-1 mr-0.5">$</span><span class="dynamic-dollar font-price-hero text-[64px] leading-[50px] font-black text-black tracking-tight">7</span><div class="flex flex-col ml-0.5 items-start justify-start"><span class="dynamic-cents font-price-cents text-[26px] leading-[22px] font-black text-black">49</span><span class="font-metadata-micro text-[7px] text-black font-bold uppercase mt-1">EACH</span></div></div><div class="w-full bg-black text-white text-center font-metadata-micro text-[7px] font-bold py-0.5 tracking-wider uppercase">GS1 COMPLIANT SHELF EDGE</div></div></div></div>
+</div>
+<!-- Technical Inspection Metadata footer -->
+<div class="mt-3 grid grid-cols-3 gap-2 font-metadata-micro text-[10px] text-on-surface-variant bg-surface-container-low p-2 border border-surface-container-highest">
+<div class=""><span class="font-bold text-on-surface">Thermal Head:</span> 203 DPI (8 dpmm)</div>
+<div class=""><span class="font-bold text-on-surface">Quiet Zone:</span> 10 modules (Min 2.5mm)</div>
+<div class=""><span class="font-bold text-on-surface">Barcode Spec:</span> UPC-A / EAN-13</div>
+</div>
+</div>
+<!-- ========================================================= -->
+<!-- CARD 2: PROMOTIONAL / SPECIAL VALUE TAG                  -->
+<!-- ========================================================= -->
+<div class="border border-on-surface bg-surface-container-lowest p-4">
+<div class="flex items-center justify-between pb-2 mb-3 border-b border-on-surface">
+<div class="flex items-center gap-2">
+<span class="bg-primary-container text-on-primary font-metadata-micro px-2 py-0.5 font-bold uppercase">TYPE 02</span>
+<h2 class="font-product-title text-base font-bold uppercase tracking-wide">Promotional / Special Value Tag</h2>
+</div>
+<span class="font-metadata-micro text-xs text-on-surface-variant">KNOCKOUT HERO [406×203 PX]</span>
+</div>
+<div class="flex flex-col items-center justify-center p-4 bg-surface-container-high border border-outline border-dashed">
+<!-- PHYSICAL LABEL CONTAINER (Strict 406px x 203px) -->
+<div class="thermal-tag-canvas border-2 border-black flex flex-col justify-between"><div class="bg-black text-white px-2 py-1 flex justify-between items-center h-10 border-b-2 border-black"><div class="flex items-center gap-2"><img alt="Cloud 9 Kitchen &amp; Market" class="thermal-logo-img h-9 w-auto object-contain invert brightness-0" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_AuDh3aLm6uwjCxAftBz-TvALCIuy1PYqfT-MllDi9bhRwHffTpIY9E2NxYyDyshzf0jXYrDljaLgpHxTcYAwG2ow435EFypa4BIa60X_mQobJ5vzIq2YVsRug4PuQq-E2a_8AndR2IY002eMg1ulgewhjtxye_-s5pQCE1b9zKWcwhzkXHWRXfeuFbpPYYjK22gCEP8xpZ2n22d6yNXHwZjy7Xmpju6-1WlScYLkiPw95Zx6fQG6pA"><span class="font-badge-label text-[11px] font-black uppercase tracking-wider pl-1.5 border-l border-white leading-none">SPECIAL VALUE</span></div><div class="bg-white text-black font-badge-label text-[12px] font-black px-2 py-1 uppercase tracking-wider border border-white">SAVE $1.50</div></div><div class="p-2 flex-1 flex justify-between items-stretch gap-1.5"><div class="w-[48%] flex flex-col justify-between pr-1 border-r-2 border-black"><h3 class="dynamic-title font-product-title text-[17px] leading-[17px] font-black uppercase text-black line-clamp-2 tracking-tight">C9 ARTISAN ROAST TURKEY CLUB WRAP</h3><div class="mt-1 bg-black text-white px-1.5 py-0.5 flex items-center justify-between font-metadata-micro text-[8px] font-bold"><span class="line-through">WAS: $8.99</span><span class="uppercase tracking-wider">SAVE 17%</span></div><div class="mt-1 flex items-center justify-between border border-black px-1.5 py-0.5 bg-white"><span class="font-metadata-micro text-[7px] font-bold uppercase">UNIT PRICE</span><span class="dynamic-unit font-price-unit text-[9px] font-black">$0.62 / OZ</span></div><div class="font-metadata-micro text-[7px] text-black font-bold uppercase tracking-tight">EXP: SUN 11/03 • AISLE 04-B2</div></div><div class="w-[52%] flex flex-col justify-between items-end pl-1"><div class="w-full flex justify-between items-center bg-black text-white px-1.5 py-0.5 font-badge-label text-[9px] font-black uppercase tracking-widest"><span class="">PROMO SALE</span><span class="">NOW</span></div><div class="w-full flex items-start justify-end leading-none py-1"><span class="font-price-hero text-[28px] font-black text-black pt-1 mr-0.5">$</span><span class="dynamic-dollar font-price-hero text-[64px] leading-[48px] font-black text-black tracking-tight">7</span><div class="flex flex-col ml-0.5 items-start justify-start"><span class="dynamic-cents font-price-cents text-[26px] leading-[22px] font-black text-black">49</span><span class="font-metadata-micro text-[7px] font-black text-black uppercase mt-1">EACH</span></div></div><div class="w-full border-t border-black pt-1 flex items-center justify-between"><span class="font-metadata-micro text-[7px] font-bold text-black">C9 MEMBER PERK</span><span class="font-metadata-micro text-[7px] font-bold bg-neutral-200 px-1 border border-black">LIMIT 4</span></div></div></div><div class="border-t-2 border-black px-2 py-1 flex items-center justify-between bg-black text-white"><div class="flex items-center gap-2"><div class="w-40 h-5 flex items-end space-x-[1px] bg-white overflow-hidden px-1"><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[4px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[4px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span></div><span class="dynamic-barcode font-barcode-numeral text-[8px] font-bold text-white">048192730194</span></div><div class="font-metadata-micro text-[8px] font-bold text-white uppercase tracking-widest">CLOUD 9 VALUE GUARANTEE</div></div></div>
+</div>
+<!-- Technical Inspection Metadata footer -->
+<div class="mt-3 grid grid-cols-3 gap-2 font-metadata-micro text-[10px] text-on-surface-variant bg-surface-container-low p-2 border border-surface-container-highest">
+<div class=""><span class="font-bold text-on-surface">Contrast:</span> Knockout Inverted</div>
+<div class=""><span class="font-bold text-on-surface">Burn Time:</span> +15% Head Heat</div>
+<div class=""><span class="font-bold text-on-surface">Strikethrough:</span> 1.5px Hairline</div>
+</div>
+</div>
+<!-- ========================================================= -->
+<!-- CARD 3: HIGH-DENSITY / INVENTORY SCANNER OPTIMIZED        -->
+<!-- ========================================================= -->
+<div class="border border-on-surface bg-surface-container-lowest p-4">
+<div class="flex items-center justify-between pb-2 mb-3 border-b border-on-surface">
+<div class="flex items-center gap-2">
+<span class="bg-secondary text-on-secondary font-metadata-micro px-2 py-0.5 font-bold uppercase">TYPE 03</span>
+<h2 class="font-product-title text-base font-bold uppercase tracking-wide">Inventory / Fast Handheld Scan</h2>
+</div>
+<span class="font-metadata-micro text-xs text-on-surface-variant">MAX SCAN BAY [406×203 PX]</span>
+</div>
+<div class="flex flex-col items-center justify-center p-4 bg-surface-container-high border border-outline border-dashed">
+<!-- PHYSICAL LABEL CONTAINER (Strict 406px x 203px) -->
+<div class="thermal-tag-canvas border-2 border-black flex flex-col justify-between p-2"><div class="flex justify-between items-center bg-black text-white px-2 py-1 border-b-2 border-black"><div class="flex items-center gap-2"><span class="dynamic-shelf font-metadata-micro text-[9px] font-bold tracking-widest uppercase">LOC: AISLE 04-B2 • SEC-01</span></div><div class="flex items-center gap-2"><span class="font-metadata-micro text-[8px] font-bold bg-white text-black px-1">FACING: 2</span><span class="font-metadata-micro text-[9px] font-bold">BAY #9042</span></div></div><div class="flex justify-between items-center py-1 border-b-2 border-black px-1"><img alt="Cloud 9 Kitchen &amp; Market" class="thermal-logo-img h-9 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_AuDh3aLm6uwjCxAftBz-TvALCIuy1PYqfT-MllDi9bhRwHffTpIY9E2NxYyDyshzf0jXYrDljaLgpHxTcYAwG2ow435EFypa4BIa60X_mQobJ5vzIq2YVsRug4PuQq-E2a_8AndR2IY002eMg1ulgewhjtxye_-s5pQCE1b9zKWcwhzkXHWRXfeuFbpPYYjK22gCEP8xpZ2n22d6yNXHwZjy7Xmpju6-1WlScYLkiPw95Zx6fQG6pA"><div class="text-right flex-1 pl-2"><h4 class="dynamic-title font-product-title text-[17px] leading-[17px] font-black uppercase text-black line-clamp-1 tracking-tight">C9 ARTISAN ROAST TURKEY CLUB WRAP</h4><div class="flex justify-end gap-2 font-metadata-micro text-[8px] font-bold text-black mt-0.5"><span class="bg-neutral-200 border border-black px-1">SKU: 8810-WRAP</span><span class="bg-black text-white px-1">PACK: 12 CT</span></div></div></div><div class="flex-1 flex justify-between items-stretch pt-1 px-1 gap-1"><div class="w-[54%] pr-1 flex flex-col justify-between"><div class="w-full h-12 flex items-end justify-center space-x-[2px] bg-white overflow-hidden pb-0.5 border border-black"><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[4px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[4px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[5px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[4px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[5px] h-full bg-black"></span></div><div class="flex justify-between items-center pt-0.5 border-t border-black mt-0.5"><span class="dynamic-barcode font-barcode-numeral text-[9px] font-black tracking-widest text-black">[91] 048192730194 00</span></div></div><div class="w-[46%] leading-none border-l-2 border-black pl-1.5 flex flex-col justify-between items-end"><div class="w-full flex justify-between items-center border-b border-black pb-0.5"><span class="font-metadata-micro text-[7px] font-bold uppercase">HANDHELD GUN</span><span class="font-price-unit text-[8px] font-bold">$0.62/OZ</span></div><div class="w-full flex items-start justify-end leading-none py-0.5"><span class="font-price-hero text-[24px] font-black text-black pt-1 mr-0.5">$</span><span class="dynamic-dollar font-price-hero text-[60px] leading-[46px] font-black text-black tracking-tight">7</span><div class="flex flex-col ml-0.5 items-start justify-start"><span class="dynamic-cents font-price-cents text-[24px] leading-[20px] font-black text-black">49</span><span class="font-metadata-micro text-[7px] font-bold uppercase mt-1">STD</span></div></div><div class="w-full bg-black text-white text-center font-metadata-micro text-[7px] font-bold py-0.5 uppercase tracking-widest">INVENTORY AUTO-SYNC</div></div></div></div>
+</div>
+<!-- Technical Inspection Metadata footer -->
+<div class="mt-3 grid grid-cols-3 gap-2 font-metadata-micro text-[10px] text-on-surface-variant bg-surface-container-low p-2 border border-surface-container-highest">
+<div class=""><span class="font-bold text-on-surface">Target Range:</span> 3ft Gun Scan</div>
+<div class=""><span class="font-bold text-on-surface">Symbology:</span> Code 128 / Auto-C</div>
+<div class=""><span class="font-bold text-on-surface">Aspect Ratio:</span> 3.2:1 Bar Height</div>
+</div>
+</div>
+<!-- ========================================================= -->
+<!-- CARD 4: KITCHEN & PREPARED FOODS GRAB & GO                -->
+<!-- ========================================================= -->
+<div class="border border-on-surface bg-surface-container-lowest p-4">
+<div class="flex items-center justify-between pb-2 mb-3 border-b border-on-surface">
+<div class="flex items-center gap-2">
+<span class="bg-on-tertiary-fixed text-surface-container-lowest font-metadata-micro px-2 py-0.5 font-bold uppercase">TYPE 04</span>
+<h2 class="font-product-title text-base font-bold uppercase tracking-wide">Kitchen &amp; Prepared Foods Grab &amp; Go</h2>
+</div>
+<span class="font-metadata-micro text-xs text-on-surface-variant">FRESH PREP SPEC [406×203 PX]</span>
+</div>
+<div class="flex flex-col items-center justify-center p-4 bg-surface-container-high border border-outline border-dashed">
+<!-- PHYSICAL LABEL CONTAINER (Strict 406px x 203px) -->
+<div class="thermal-tag-canvas border-2 border-black flex flex-col justify-between p-2"><div class="flex justify-between items-center border-b-2 border-black pb-1"><div class="flex items-center gap-2"><img alt="Cloud 9 Kitchen &amp; Market" class="thermal-logo-img h-10 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_AuDh3aLm6uwjCxAftBz-TvALCIuy1PYqfT-MllDi9bhRwHffTpIY9E2NxYyDyshzf0jXYrDljaLgpHxTcYAwG2ow435EFypa4BIa60X_mQobJ5vzIq2YVsRug4PuQq-E2a_8AndR2IY002eMg1ulgewhjtxye_-s5pQCE1b9zKWcwhzkXHWRXfeuFbpPYYjK22gCEP8xpZ2n22d6yNXHwZjy7Xmpju6-1WlScYLkiPw95Zx6fQG6pA"><div class="border-l-2 border-black pl-1.5"><span class="font-badge-label text-[10px] font-black uppercase tracking-wider text-black block leading-none">KITCHEN FRESH</span><span class="font-metadata-micro text-[7px] text-black font-bold uppercase mt-0.5 block">PREP: TODAY 06:00 AM</span></div></div><div class="border-2 border-black px-2 py-0.5 text-center bg-black text-white min-w-[70px]"><span class="font-metadata-micro text-[8px] font-black block uppercase tracking-widest text-white">BEST BY</span><span class="font-product-title text-[14px] font-black tracking-tight leading-none text-white">OCT 28</span></div></div><div class="py-1 border-b border-black"><div class="flex justify-between items-start"><div class="w-full"><h3 class="dynamic-title font-product-title text-[17px] leading-[17px] font-black uppercase text-black line-clamp-1 tracking-tight">C9 ARTISAN ROAST TURKEY CLUB WRAP</h3><div class="flex flex-wrap items-center gap-1.5 mt-0.5 font-metadata-micro text-[7px]"><span class="bg-black text-white px-1.5 py-0.5 font-bold uppercase">CONTAINS WHEAT, MILK</span><span class="border-2 border-black px-1.5 py-0.5 font-bold">580 CAL</span><span class="font-bold uppercase text-black">NET WT 12.4 OZ</span></div></div></div></div><div class="flex-1 flex justify-between items-stretch pt-1 gap-1.5"><div class="w-[50%] flex items-center justify-between gap-1"><div class="flex items-center gap-1.5"><div class="w-8 h-8 border-2 border-black p-0.5 flex flex-wrap gap-[1px] bg-white"><span class="w-1.5 h-1.5 bg-black"></span><span class="w-1.5 h-1.5 bg-black"></span><span class="w-1.5 h-1.5 bg-black"></span><span class="w-1.5 h-1.5 bg-black"></span><span class="w-1.5 h-1.5 bg-black"></span><span class="w-1.5 h-1.5 bg-black"></span></div><div class="font-metadata-micro text-[7px] leading-tight font-bold"><span class="block uppercase">SCAN QR</span><span class="text-[6px] text-neutral-600">NUTRITION</span></div></div><div class="flex flex-col items-end"><div class="w-20 h-5 flex items-end space-x-[1px] bg-white overflow-hidden justify-end"><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span></div><span class="dynamic-barcode font-barcode-numeral text-[7px] font-bold mt-0.5">04819273</span></div></div><div class="w-[50%] text-right border-l-2 border-black pl-1.5 flex flex-col justify-between items-end"><div class="w-full flex justify-between items-center"><span class="font-badge-label text-[9px] uppercase font-bold text-white bg-black px-1.5 py-0.5 text-center">GRAB &amp; GO</span><span class="font-metadata-micro text-[7px] font-bold">DELI FRESH</span></div><div class="w-full flex items-start justify-end leading-none py-0.5"><span class="font-price-hero text-[26px] font-black text-black pt-1 mr-0.5">$</span><span class="dynamic-dollar font-price-hero text-[62px] leading-[48px] font-black text-black tracking-tight">7</span><div class="flex flex-col ml-0.5 items-start justify-start"><span class="dynamic-cents font-price-cents text-[26px] leading-[22px] font-black text-black">49</span><span class="font-metadata-micro text-[7px] font-black uppercase text-black mt-1">EACH</span></div></div><div class="w-full text-right font-metadata-micro text-[7px] font-bold uppercase">FDA 21 CFR COMPLIANT</div></div></div></div>
+</div>
+<!-- Technical Inspection Metadata footer -->
+<div class="mt-3 grid grid-cols-3 gap-2 font-metadata-micro text-[10px] text-on-surface-variant bg-surface-container-low p-2 border border-surface-container-highest">
+<div class=""><span class="font-bold text-on-surface">Allergen Callout:</span> FDA 21 CFR Compliant</div>
+<div class=""><span class="font-bold text-on-surface">QR Code Module:</span> 2D Aztec/QR 33x33</div>
+<div class=""><span class="font-bold text-on-surface">Prep Timestamp:</span> Direct RTC Synced</div>
+</div>
+</div>
+</div>
+<!-- ============================================================== -->
+<!-- SHELF MOLDING CHANNEL PREVIEW (C-STORE 1.25" CHANNEL RAIL VIEW) -->
+<!-- ============================================================== -->
+<section class="mt-8 border border-on-surface bg-surface-container-lowest p-4">
+<div class="flex items-center justify-between pb-2 mb-3 border-b border-on-surface">
+<div>
+<h3 class="font-product-title text-lg font-bold uppercase tracking-wide flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container" data-icon="view_column">view_column</span>
+            Live Shelf Rail Context Preview (1.25" Anodized C-Channel)
+          </h3>
+<p class="font-metadata-micro text-xs text-on-surface-variant">
+            Physical simulation of printed tags seated consecutively in store gondola shelf track.
+          </p>
+</div>
+<span class="bg-surface-container-highest text-on-surface text-[10px] font-metadata-micro px-2 py-0.5 border border-outline">
+          SCALE: 75% AMBIENT VIEW
+        </span>
+</div>
+<!-- The Channel Simulation Strip -->
+<div class="shelf-rail p-4 rounded-none border-y-4 border-neutral-900 overflow-x-auto">
+<div class="flex items-center gap-6 min-w-[900px] justify-center py-2"><div class="transform scale-90 origin-center shadow-lg border-2 border-black bg-white"><div class="w-[360px] h-[180px] p-2 flex flex-col justify-between text-black bg-white"><div class="flex justify-between items-center border-b-2 border-black pb-1"><div class="flex items-center gap-1.5"><img alt="Cloud 9" class="h-9 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_AuDh3aLm6uwjCxAftBz-TvALCIuy1PYqfT-MllDi9bhRwHffTpIY9E2NxYyDyshzf0jXYrDljaLgpHxTcYAwG2ow435EFypa4BIa60X_mQobJ5vzIq2YVsRug4PuQq-E2a_8AndR2IY002eMg1ulgewhjtxye_-s5pQCE1b9zKWcwhzkXHWRXfeuFbpPYYjK22gCEP8xpZ2n22d6yNXHwZjy7Xmpju6-1WlScYLkiPw95Zx6fQG6pA"><span class="font-metadata-micro text-[8px] font-bold border-l border-black pl-1 leading-none">MK-203D</span></div><div class="text-right"><span class="font-metadata-micro text-[8px] font-bold block uppercase">AISLE 04-B2</span><span class="font-metadata-micro text-[7px] bg-black text-white px-1 font-bold">DELI FRESH</span></div></div><div class="py-0.5 border-b border-black"><div class="font-product-title text-[15px] font-black leading-tight uppercase line-clamp-1">C9 ARTISAN ROAST TURKEY CLUB WRAP</div><div class="flex justify-between font-metadata-micro text-[8px] font-bold"><span class="">12.4 OZ (351g)</span><span class="">$0.62 / OZ</span></div></div><div class="flex justify-between items-end pt-1"><div class="w-32"><div class="w-full h-8 flex items-end space-x-[1px] bg-white overflow-hidden border border-black px-0.5"><span class="w-[2px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span><span class="w-[3px] h-full bg-black"></span><span class="w-[1px] h-full bg-black"></span><span class="w-[2px] h-full bg-black"></span></div><div class="font-barcode-numeral text-[7px] text-center font-bold mt-0.5">0 48192 73019 4</div></div><div class="flex items-start justify-end leading-none"><span class="font-price-hero text-[24px] font-black pt-1 mr-0.5">$</span><span class="font-price-hero text-[58px] leading-[44px] font-black tracking-tight">7</span><div class="flex flex-col ml-0.5"><span class="font-price-cents text-[24px] leading-[20px] font-black">49</span><span class="font-badge-label text-[8px] bg-black text-white px-1 font-bold mt-0.5">RETAIL</span></div></div></div></div></div><div class="w-1 h-44 bg-neutral-700 border-x border-neutral-900"></div><div class="transform scale-90 origin-center shadow-lg border-2 border-black bg-white"><div class="w-[360px] h-[180px] flex flex-col justify-between text-black bg-white"><div class="bg-black text-white px-2 py-1 flex justify-between items-center h-9 border-b-2 border-black"><div class="flex items-center gap-1.5"><img alt="Cloud 9" class="h-8 w-auto object-contain invert brightness-0" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_AuDh3aLm6uwjCxAftBz-TvALCIuy1PYqfT-MllDi9bhRwHffTpIY9E2NxYyDyshzf0jXYrDljaLgpHxTcYAwG2ow435EFypa4BIa60X_mQobJ5vzIq2YVsRug4PuQq-E2a_8AndR2IY002eMg1ulgewhjtxye_-s5pQCE1b9zKWcwhzkXHWRXfeuFbpPYYjK22gCEP8xpZ2n22d6yNXHwZjy7Xmpju6-1WlScYLkiPw95Zx6fQG6pA"><span class="font-badge-label text-[10px] font-black uppercase pl-1 border-l border-white">SPECIAL VALUE</span></div><span class="bg-white text-black font-badge-label text-[10px] font-black px-2 py-0.5 uppercase">SAVE $1.50</span></div><div class="p-2 flex-1 flex justify-between items-stretch"><div class="w-[48%] border-r-2 border-black pr-1 flex flex-col justify-between"><div class="font-product-title text-[14px] font-black uppercase leading-tight line-clamp-1">C9 ARTISAN ROAST TURKEY CLUB WRAP</div><div class="font-metadata-micro text-[8px] line-through font-bold bg-neutral-200 px-1 inline-block">WAS: $8.99</div><div class="font-metadata-micro text-[8px] font-bold border border-black px-1 py-0.5 inline-block">$0.62 / OZ</div></div><div class="w-[52%] flex items-start justify-end leading-none pl-1"><span class="font-price-hero text-[24px] font-black pt-1 mr-0.5">$</span><span class="font-price-hero text-[58px] leading-[44px] font-black tracking-tight">7</span><div class="flex flex-col ml-0.5"><span class="font-price-cents text-[24px] leading-[20px] font-black">49</span><span class="font-badge-label text-[8px] bg-black text-white px-1 font-bold mt-0.5">NOW</span></div></div></div><div class="border-t-2 border-black px-2 py-1 flex justify-between items-center text-[7px] font-metadata-micro bg-black text-white"><span class="font-mono font-bold">048192730194</span><span class="font-badge-label text-[8px] font-black uppercase tracking-wider">NOW IN SHELF RAIL</span></div></div></div><div class="w-1 h-44 bg-neutral-700 border-x border-neutral-900"></div><div class="transform scale-90 origin-center shadow-lg border-2 border-black bg-white"><div class="w-[360px] h-[180px] p-2 flex flex-col justify-between text-black bg-white"><div class="flex justify-between items-center border-b-2 border-black pb-1"><img alt="Cloud 9" class="h-9 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_AuDh3aLm6uwjCxAftBz-TvALCIuy1PYqfT-MllDi9bhRwHffTpIY9E2NxYyDyshzf0jXYrDljaLgpHxTcYAwG2ow435EFypa4BIa60X_mQobJ5vzIq2YVsRug4PuQq-E2a_8AndR2IY002eMg1ulgewhjtxye_-s5pQCE1b9zKWcwhzkXHWRXfeuFbpPYYjK22gCEP8xpZ2n22d6yNXHwZjy7Xmpju6-1WlScYLkiPw95Zx6fQG6pA"><div class="border-2 border-black px-2 py-0.5 font-metadata-micro bg-black text-white text-center"><span class="text-[7px] font-black block uppercase">BEST BY</span><span class="font-product-title text-[11px] font-black">10/28</span></div></div><div class="py-0.5 border-b border-black"><div class="font-product-title text-[14px] font-black uppercase leading-tight line-clamp-1">C9 ARTISAN ROAST TURKEY CLUB WRAP</div><div class="flex gap-1 font-metadata-micro text-[7px] mt-0.5"><span class="bg-black text-white px-1 font-bold">ALLERGENS: WHEAT</span><span class="border border-black px-1 font-bold">580 CAL</span></div></div><div class="flex justify-between items-end pt-1"><div class="flex items-center gap-1"><div class="w-6 h-6 border border-black p-0.5 bg-white"><div class="w-full h-full bg-black"></div></div><span class="font-metadata-micro text-[7px] font-bold leading-tight">SCAN QR<br>NUTRITION</span></div><div class="flex items-start justify-end leading-none"><span class="font-price-hero text-[24px] font-black pt-1 mr-0.5">$</span><span class="font-price-hero text-[58px] leading-[44px] font-black tracking-tight">7</span><div class="flex flex-col ml-0.5"><span class="font-price-cents text-[24px] leading-[20px] font-black">49</span><span class="font-badge-label text-[8px] border border-black px-1 font-bold mt-0.5">GRAB &amp; GO</span></div></div></div></div></div></div>
+</div>
+</section>
+</main>
+<!-- ========================================== -->
+<!-- BOTTOM NAV BAR (Mandatory Shared Component)-->
+<!-- ========================================== -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center h-12 border-t border-on-surface dark:border-outline bg-surface-container-lowest dark:bg-inverse-surface">
+<!-- Destination 1: Batch -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-surface-variant px-space-md py-space-xs hover:bg-surface-container dark:hover:bg-inverse-surface active:bg-surface-container-highest transition-none" href="#batch">
+<span class="material-symbols-outlined" data-icon="layers">layers</span>
+<span class="font-metadata-micro text-metadata-micro uppercase">Batch</span>
+</a>
+<!-- Destination 2: Single (ACTIVE for this comparison showcase) -->
+<a class="flex flex-col items-center justify-center bg-on-surface text-surface-container-lowest dark:bg-surface-container-lowest dark:text-on-surface px-space-md py-space-xs rounded-none active:bg-surface-container-highest transition-none" href="#single">
+<span class="material-symbols-outlined" data-icon="label">label</span>
+<span class="font-metadata-micro text-metadata-micro uppercase font-bold">Single</span>
+</a>
+<!-- Destination 3: Sheets -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-surface-variant px-space-md py-space-xs hover:bg-surface-container dark:hover:bg-inverse-surface active:bg-surface-container-highest transition-none" href="#sheets">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+<span class="font-metadata-micro text-metadata-micro uppercase">Sheets</span>
+</a>
+<!-- Destination 4: Queues -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-surface-variant px-space-md py-space-xs hover:bg-surface-container dark:hover:bg-inverse-surface active:bg-surface-container-highest transition-none" href="#queues">
+<span class="material-symbols-outlined" data-icon="print_connect">print_connect</span>
+<span class="font-metadata-micro text-metadata-micro uppercase">Queues</span>
+</a>
+</nav>
+<!-- ========================================== -->
+<!-- CLIENT INTERACTIVE SCRIPT LOGIC            -->
+<!-- ========================================== -->
+<script>
+    // Mode toggling: 1-Bit Thermal B&W vs Full Color Proof
+    function setRenderMode(mode) {
+      const container = document.getElementById('labels-container');
+      const btnThermal = document.getElementById('toggle-thermal-btn');
+      const btnColor = document.getElementById('toggle-color-btn');
+
+      if (mode === 'thermal') {
+        container.classList.add('mode-thermal');
+        btnThermal.className = 'px-3 py-1 font-metadata-micro text-xs font-bold uppercase bg-on-surface text-surface-container-lowest transition-none flex items-center gap-1';
+        btnColor.className = 'px-3 py-1 font-metadata-micro text-xs font-bold uppercase text-on-surface hover:bg-surface-container transition-none flex items-center gap-1';
+      } else {
+        container.classList.remove('mode-thermal');
+        btnColor.className = 'px-3 py-1 font-metadata-micro text-xs font-bold uppercase bg-primary-container text-on-primary transition-none flex items-center gap-1';
+        btnThermal.className = 'px-3 py-1 font-metadata-micro text-xs font-bold uppercase text-on-surface hover:bg-surface-container transition-none flex items-center gap-1';
+      }
+    }
+
+    // Dynamic Synchronization of fields across all 4 tags
+    function syncFields() {
+      const title = document.getElementById('live-product-name').value;
+      const dollar = document.getElementById('live-price-dollar').value;
+      const cents = document.getElementById('live-price-cents').value;
+      const unit = document.getElementById('live-unit-price').value;
+      const shelf = document.getElementById('live-shelf-loc').value;
+      const barcode = document.getElementById('live-barcode-val').value;
+
+      document.querySelectorAll('.dynamic-title').forEach(el => el.textContent = title);
+      document.querySelectorAll('.dynamic-dollar').forEach(el => el.textContent = dollar);
+      document.querySelectorAll('.dynamic-cents').forEach(el => el.textContent = cents);
+      document.querySelectorAll('.dynamic-unit').forEach(el => el.textContent = unit);
+      document.querySelectorAll('.dynamic-shelf').forEach(el => el.textContent = shelf);
+      document.querySelectorAll('.dynamic-barcode').forEach(el => el.textContent = barcode);
+    }
+
+    // Interactive Action Triggers
+    function triggerPrintTest() {
+      alert("Job Sent: 4 Thermal Tags queued to Zebra ZD420 (203 DPI, 2.00\" x 1.00\", Direct Thermal Head).");
+    }
+
+    function copyZplCode() {
+      const zplSample = `^XA
+^PW406
+^LL203
+^FO20,15^A0N,18,18^FDC9 ARTISAN ROAST TURKEY CLUB WRAP^FS
+^FO20,50^BY2,2,45^BEN,45,Y,N^FD048192730194^FS
+^FO240,65^A0N,48,46^FD$7.49^FS
+^FO240,135^A0N,14,14^FD$0.62 / OZ^FS
+^XZ`;
+      navigator.clipboard.writeText(zplSample).then(() => {
+        alert("ZPL II Direct Thermal Script copied to clipboard!");
+      });
+    }
+  </script>
+
+
+</body></html>
