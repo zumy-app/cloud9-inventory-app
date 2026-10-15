@@ -270,6 +270,20 @@ void main() {
     expect(out, contains(',1,1,1,FF'));
   });
 
+  test('ticket is minimal: title, name, mac, one barcode', () {
+    final out = Tspl.composeTicket(
+        name: 'PM-241Z-BT-C075', mac: 'AA:BB:CC:C0:75');
+    expect(out, contains('CLOUD 9 TEST'));
+    expect(out, contains('PM-241Z-BT-C075'));
+    expect(out, contains('AA:BB:CC:C0:75'));
+    expect(out, contains('"128"'));
+    expect(out, contains('PRINT 1'));
+    expect(out, isNot(contains('BITMAP')));
+    final long = Tspl.composeTicket(name: 'x' * 60, mac: '');
+    expect(long, isNot(contains('X' * 41)));
+    expect(long, isNot(contains('BARCODE')));
+  });
+
   test('encode is byte-stable ascii', () {
     final bytes = Tspl.encode('SIZE 48 mm,25 mm\n');
     expect(bytes, isNotEmpty);

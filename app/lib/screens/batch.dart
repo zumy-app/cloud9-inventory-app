@@ -10,10 +10,12 @@ import '../i18n/lang.dart';
 import '../label_collections.dart';
 import '../odoo_client.dart';
 import '../print/label_model.dart';
+import '../print/printer_service.dart';
 import '../session_store.dart';
 import '../widgets/label_preview.dart';
 import 'browse.dart';
 import 'print_job_screen.dart';
+import 'printer_sheet.dart';
 
 class BatchScreen extends StatefulWidget {
   final OdooClient client;
@@ -149,6 +151,10 @@ class _BatchScreenState extends State<BatchScreen> {
         .map((l) => l.model)
         .toList();
     if (models.isEmpty || active == null) return;
+    if ((PrinterService.instance.address ?? '').isEmpty) {
+      if (mounted) await showPrinterSheet(context);
+      return;
+    }
     setState(() {
       _lineSel = false;
       _lineKeys.clear();
@@ -294,12 +300,18 @@ class _BatchScreenState extends State<BatchScreen> {
     }
   }
 
+  /// Print icons route to the printer sheet when no printer is saved —
+  /// the sheet (not an error snackbar) is the fix for "Bad state".
   Future<void> _printAll() async {
     final active = LabelCollections.instance.active;
     final models = LabelCollections.instance.activeLines
         .map((l) => l.model)
         .toList();
     if (models.isEmpty || active == null) return;
+    if ((PrinterService.instance.address ?? '').isEmpty) {
+      if (mounted) await showPrinterSheet(context);
+      return;
+    }
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) =>
@@ -402,6 +414,34 @@ class _BatchScreenState extends State<BatchScreen> {
               }),
             )
           else ...[
+            ListenableBuilder(
+              listenable: PrinterService.instance,
+              builder: (context, _) {
+                final svc = PrinterService.instance;
+                final addr = svc.address ?? '';
+                final ok = addr.isNotEmpty &&
+                    svc.status != PrinterStatus.error;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: ActionChip(
+                    tooltip: svc.statusMessage ??
+                        t('ptr_sheet_title'),
+                    avatar: Icon(
+                      Icons.print,
+                      size: 16,
+                      color: ok ? Colors.green.shade800 : Colors.grey,
+                    ),
+                    label: Text(
+                      addr.isEmpty
+                          ? t('ptr_none')
+                          : shortMac(addr),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onPressed: () => showPrinterSheet(context),
+                  ),
+                );
+              },
+            ),
             IconButton(
               tooltip: t('batch_browse'),
               icon: const Icon(Icons.playlist_add),

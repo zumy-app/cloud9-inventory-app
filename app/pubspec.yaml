@@ -43,6 +43,9 @@ dependencies:
   share_plus: ^11.0.0
   image: ^4.10.1
   barcode_widget: ^2.0.4
+  print_bluetooth_thermal: ^1.2.5
+  permission_handler: ^13.0.2
+  android_intent_plus: ^6.1.0
 
 dev_dependencies:
   flutter_test:

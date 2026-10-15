@@ -173,6 +173,40 @@ class Lang extends ChangeNotifier {
     'batch_job_title': 'Printing',
     'batch_print_selected_title': 'Printing selection',
     'batch_shelf_defaults': 'Shelf tag defaults',
+    // Printer transport (PrinterException.toString renders these, so
+    // every snackbar + print-job row is friendly with no per-screen
+    // mapping; printed labels stay English-only per the file header).
+    'ptr_noprntr':
+        'No printer connected. Pair a label printer first (Labels tab → printer icon).',
+    'ptr_btoff': 'Bluetooth is off — turn it on to print.',
+    'ptr_noperm': 'Nearby-devices permission is needed to talk to the printer.',
+    'ptr_notfound':
+        'Saved printer not found ({detail}). Pair it in Settings, then reselect it.',
+    'ptr_unreach':
+        'Could not reach the printer — check power and range. Only one app can hold it: disconnect it from Labelife first.',
+    'ptr_writefail': 'Print write failed ({detail}).',
+    // Printer management sheet (app UI — translated, unlike printed
+    // badge text which stays English per the file header).
+    'ptr_sheet_title': 'Label printer',
+    'ptr_none': 'No printer',
+    'ptr_ready': 'Ready',
+    'ptr_hint_labelife':
+        'Only one app can use the printer at a time. Disconnect it from Labelife (or any other printer app) before connecting here.',
+    'ptr_bt_off_msg':
+        'Bluetooth is off. Turn it on, then choose your printer below.',
+    'ptr_enable_bt': 'Turn on Bluetooth',
+    'ptr_perm_msg':
+        'Nearby-devices permission is needed to list and use paired printers.',
+    'ptr_perm_allow': 'Allow',
+    'ptr_perm_settings': 'Open settings',
+    'ptr_choose': 'Paired printers',
+    'ptr_no_bonded':
+        'No paired printers found. Pair the printer in Android Settings first, then reopen this.',
+    'ptr_testing': 'Printing test ticket…',
+    'ptr_test_ok': 'Test ticket sent — check the printer.',
+    'ptr_forget': 'Forget printer',
+    'ptr_darkness': 'Print darkness',
+    'ptr_refresh': 'Recheck',
     // Browse / manage / picker
     'browse_added_n': 'Added {n} to labels',
     'browse_addall_title': 'Add all to labels?',
@@ -472,6 +506,36 @@ class Lang extends ChangeNotifier {
     'batch_job_title': 'Imprimiendo',
     'batch_print_selected_title': 'Imprimiendo selección',
     'batch_shelf_defaults': 'Valores del estante',
+    'ptr_noprntr':
+        'Sin impresora conectada. Vincule una impresora primero (Etiquetas → icono de impresora).',
+    'ptr_btoff': 'Bluetooth apagado — enciéndalo para imprimir.',
+    'ptr_noperm':
+        'Se necesita el permiso de dispositivos cercanos para la impresora.',
+    'ptr_notfound':
+        'Impresora guardada no encontrada ({detail}). Vincúlela en Ajustes y selecciónela.',
+    'ptr_unreach':
+        'No se pudo alcanzar la impresora — revise energía y distancia. Solo una app puede usarla: desconéctela de Labelife primero.',
+    'ptr_writefail': 'Falló el envío ({detail}).',
+    'ptr_sheet_title': 'Impresora de etiquetas',
+    'ptr_none': 'Sin impresora',
+    'ptr_ready': 'Lista',
+    'ptr_hint_labelife':
+        'Solo una app puede usar la impresora a la vez. Desconéctela de Labelife (u otra app) antes de conectar aquí.',
+    'ptr_bt_off_msg':
+        'Bluetooth está apagado. Enciéndalo y elija su impresora.',
+    'ptr_enable_bt': 'Encender Bluetooth',
+    'ptr_perm_msg':
+        'Se necesita el permiso de dispositivos cercanos para ver y usar impresoras vinculadas.',
+    'ptr_perm_allow': 'Permitir',
+    'ptr_perm_settings': 'Abrir ajustes',
+    'ptr_choose': 'Impresoras vinculadas',
+    'ptr_no_bonded':
+        'Sin impresoras vinculadas. Vincule la impresora en Ajustes de Android y reabra esto.',
+    'ptr_testing': 'Imprimiendo prueba…',
+    'ptr_test_ok': 'Prueba enviada — revise la impresora.',
+    'ptr_forget': 'Olvidar impresora',
+    'ptr_darkness': 'Oscuridad',
+    'ptr_refresh': 'Revisar',
     'browse_added_n': '{n} agregados a etiquetas',
     'browse_addall_title': '¿Agregar todo a etiquetas?',
     'browse_addall_msg': '{n} artículos × 1 copia se agregarán.',

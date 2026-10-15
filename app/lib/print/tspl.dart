@@ -833,6 +833,36 @@ class Tspl {
     return sb.toString();
   }
 
+  /// Tiny connectivity ticket for the printer-sheet test print
+  /// (not a shelf label): title, printer name, MAC, one Code128.
+  /// Burns minimal stock by design.
+  static String composeTicket({
+    required String name,
+    required String mac,
+    int density = 8,
+  }) {
+    var n = name.trim().isEmpty ? 'PRINTER' : name.trim().toUpperCase();
+    if (n.length > 40) n = n.substring(0, 40);
+    final macT = _q(mac.trim());
+    final code = mac.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+    final sb = StringBuffer();
+    sb.writeln('SIZE 48 mm,25 mm');
+    sb.writeln('GAP 3 mm,0');
+    sb.writeln('DENSITY $density');
+    sb.writeln('DIRECTION 1');
+    sb.writeln('CLS');
+    sb.writeln('TEXT 10,8,"2",0,1,1,"CLOUD 9 TEST"');
+    sb.writeln('TEXT 10,34,"1",0,1,1,"${_q(n)}"');
+    if (macT.isNotEmpty) {
+      sb.writeln('TEXT 10,50,"1",0,1,1,"$macT"');
+    }
+    if (code.isNotEmpty) {
+      sb.writeln('BARCODE 10,66,"128",40,0,0,2,2,"${_q(code)}"');
+    }
+    sb.writeln('PRINT 1');
+    return sb.toString();
+  }
+
   /// Encode a composed label for the wire (TSPL is byte-oriented).
   /// Non-Latin-1 chars are replaced with '?' (latin1.encode throws on them).
   static List<int> encode(String tspl) =>
