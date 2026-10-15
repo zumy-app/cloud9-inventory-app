@@ -164,6 +164,7 @@ class _BatchScreenState extends State<BatchScreen> {
 
   Future<void> _ensureLoaded() async {
     await LabelCollections.instance.load();
+    await LabelDefaults.load();
     // One-time migration from the legacy single batch.
     if (BatchStore.instance.lines.isNotEmpty) {
       LabelCollections.instance.migrateFromLegacy(
@@ -221,6 +222,78 @@ class _BatchScreenState extends State<BatchScreen> {
     );
   }
 
+  /// Store-level Type 01 defaults (docs/06 §3): set once, stamped onto
+  /// every new pick. Field labels reuse the shelf-tag sheet strings.
+  Future<void> _editDefaults() async {
+    final loc = TextEditingController(text: LabelDefaults.shelfLoc);
+    final ver = TextEditingController(text: LabelDefaults.verifyDate);
+    final slot = TextEditingController(text: LabelDefaults.slot);
+    final dept = TextEditingController(text: LabelDefaults.dept);
+    final each = TextEditingController(text: LabelDefaults.eachText);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(t('batch_shelf_defaults')),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                  controller: loc,
+                  decoration: InputDecoration(
+                      labelText: t('sheet_shelf_loc'),
+                      border: const OutlineInputBorder())),
+              const SizedBox(height: 8),
+              TextField(
+                  controller: ver,
+                  decoration: InputDecoration(
+                      labelText: t('sheet_shelf_verify'),
+                      border: const OutlineInputBorder())),
+              const SizedBox(height: 8),
+              TextField(
+                  controller: slot,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                      labelText: t('sheet_shelf_slot'),
+                      border: const OutlineInputBorder())),
+              const SizedBox(height: 8),
+              TextField(
+                  controller: dept,
+                  decoration: InputDecoration(
+                      labelText: t('sheet_shelf_dept'),
+                      border: const OutlineInputBorder())),
+              const SizedBox(height: 8),
+              TextField(
+                  controller: each,
+                  decoration: InputDecoration(
+                      labelText: t('sheet_shelf_each'),
+                      border: const OutlineInputBorder())),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('batch_cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('batch_save')),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await LabelDefaults.save(
+        shelfLoc: loc.text,
+        verifyDate: ver.text,
+        slot: slot.text,
+        dept: dept.text,
+        eachText: each.text,
+      );
+    }
+  }
+
   Future<void> _printAll() async {
     final active = LabelCollections.instance.active;
     final models = LabelCollections.instance.activeLines
@@ -275,6 +348,28 @@ class _BatchScreenState extends State<BatchScreen> {
       onPromoCleared: () {
         LabelCollections.instance.clearPromo(l);
         SessionStore.clearPromo(key);
+        Navigator.of(context).pop();
+      },
+      initialShelf: (
+        shelfLoc: l.shelfLoc,
+        verifyDate: l.verifyDate,
+        slot: l.slot,
+        dept: l.dept,
+        allergens: l.allergens,
+        taxable: l.taxable,
+        eachText: l.eachText,
+      ),
+      onShelfChanged: (s) {
+        LabelCollections.instance.setShelf(
+          l,
+          shelfLoc: s.shelfLoc,
+          verifyDate: s.verifyDate,
+          slot: s.slot,
+          dept: s.dept,
+          allergens: s.allergens,
+          taxable: s.taxable,
+          eachText: s.eachText,
+        );
         Navigator.of(context).pop();
       },
     );
@@ -343,6 +438,9 @@ class _BatchScreenState extends State<BatchScreen> {
                 case 'share':
                   await _share();
                   break;
+                case 'defaults':
+                  await _editDefaults();
+                  break;
               }
             },
             itemBuilder: (_) => [
@@ -353,6 +451,8 @@ class _BatchScreenState extends State<BatchScreen> {
               PopupMenuItem(value: 'delete', child: Text(t('batch_delete'))),
               PopupMenuItem(value: 'clear', child: Text(t('batch_clear'))),
               PopupMenuItem(value: 'share', child: Text(t('batch_share'))),
+              PopupMenuItem(
+                  value: 'defaults', child: Text(t('batch_shelf_defaults'))),
             ],
           ),
         ],

@@ -76,16 +76,32 @@ void main() {
     expect(out, contains('"1",0,1,1,"035000510892"'));
     expect(out, contains('PRINT 2'));
     expect(out, isNot(contains('"oz"')));
-    // Full name across two uppercase lines, never mid-truncated.
-    expect(out, contains('COLGATE - CAVITY PROTECTION'));
-    expect(out, contains('TOOTHPASTE, 5 OZ'));
+    // Two-tier title: the 44-char name fits the font-1 cut whole —
+    // no '...' while space remains.
+    expect(
+        out,
+        contains(
+            '"1",0,1,1,"COLGATE - CAVITY PROTECTION TOOTHPASTE, 5 OZ"'));
+    // Size survives in the subtitle micro row (category no longer doubles
+    // as the subtitle — see storeCode below).
+    expect(out, contains('"1",0,1,1,"5 OZ"'));
+    expect(out, contains('C9-DENTAL'));
     // Three-part hero lockup: small $, font-5 int, raised cents.
     expect(out, contains('"3",0,1,1,"\$"'));
     expect(out, contains('"5",0,1,1,"4"'));
     expect(out, contains('"3",0,1,1,".49"'));
-    expect(out, contains('"1",0,1,1,"RETAIL"'));
-    // Computed unit-price cell from parsed size qty.
-    expect(out, contains('\$0.90 / OZ'));
+    // Wireframe furniture: knockout badge, GS1 band, VERIF auto-stamp.
+    expect(out, contains('EVERYDAY RETAIL'));
+    expect(out, contains('REVERSE'));
+    expect(out, contains('GS1 COMPLIANT SHELF EDGE'));
+    expect(out, matches(RegExp(r'VERIF: \d{2}/\d{2}')));
+    // Defaults leave optional zones out: no slot, no DEPT, no TAXABLE,
+    // no EACH word (opt-in — a weighed item stamped EACH is wrong data).
+    expect(out, isNot(contains('DEPT')));
+    expect(out, isNot(contains('TAXABLE')));
+    expect(out, isNot(contains('"1",0,1,1,"EACH"')));
+    // Computed unit-price knockout from parsed size qty.
+    expect(out, contains('UNIT PRICE: \$0.90 / OZ'));
     // Every TEXT/BARCODE y stays inside 200 dots (bottom margin kept).
     for (final mm in RegExp(r'(?:TEXT|BARCODE|BOX|BAR) (\d+),(\d+)')
         .allMatches(out)) {
@@ -180,11 +196,70 @@ void main() {
     expect(wide, greaterThan(narrow));
   });
 
-  test('empty code prints NO BARCODE placeholder, never blank', () {
+  test('empty code prints ADD BARCODE placeholder, never blank', () {
     const m = LabelModel(name: 'Bulk Candy', price: 1.5, barcode: '');
     final out = Tspl.compose(m);
     expect(RegExp(r'^BARCODE ', multiLine: true).hasMatch(out), isFalse);
-    expect(out, contains('NO BARCODE'));
+    expect(out, contains('ADD BARCODE'));
+  });
+
+  test('type01 shelf payload renders every zone', () {
+    const m = LabelModel(
+      name: 'C9 Artisan Roast Turkey Club Wrap',
+      size: '12.4 oz',
+      price: 7.49,
+      barcode: '048192730194',
+      category: 'Deli',
+      shelfLoc: 'AISLE 04-B2',
+      verifyDate: '10/24',
+      slot: 'MK-203D\nST-084',
+      dept: '04',
+      allergens: 'CONTAINS GLUTEN',
+      taxable: true,
+      eachText: 'EACH',
+    );
+    final out = Tspl.compose(m);
+    expect(out, contains('AISLE 04-B2'));
+    expect(out, contains('VERIF: 10/24'));
+    expect(out, contains('MK-203D'));
+    expect(out, contains('ST-084'));
+    expect(out, contains('DEPT 04'));
+    expect(out, contains('CONTAINS GLUTEN'));
+    expect(out, contains('TAXABLE'));
+    expect(out, contains('"1",0,1,1,"EACH"'));
+    expect(out, contains('UNIT PRICE: \$0.60 / OZ'));
+    for (final mm in RegExp(r'(?:TEXT|BARCODE|BOX|BAR) (\d+),(\d+)')
+        .allMatches(out)) {
+      expect(int.parse(mm.group(2)!), lessThanOrEqualTo(192),
+          reason: '${mm.group(0)} exceeds budget');
+    }
+  });
+
+  test('shelf helpers: verify stamp, slots, store code, shelf line', () {    expect(Tspl.verifyText('10/24'), 'VERIF: 10/24');
+    expect(Tspl.verifyText('', DateTime(2026, 3, 5)), 'VERIF: 03/26');
+    expect(Tspl.slotLines('MK-203D\nST-084'), ['MK-203D', 'ST-084']);
+    expect(Tspl.slotLines('  \n '), isEmpty);
+    expect(Tspl.slotLines('a\nb\nc'), ['A', 'B']);
+    expect(Tspl.storeCode('Dental'), 'C9-DENTAL');
+    expect(Tspl.storeCode(''), isEmpty);
+    expect(Tspl.shelfLine('AISLE 1', 'Deli'), 'AISLE 1');
+    expect(Tspl.shelfLine('', 'Deli'), 'DELI');
+    expect(Tspl.shelfLine('', ''), isEmpty);
+  });
+
+  test('titleFit tiers: font 2 to 30 chars, font 1 to 44, ellipsis after',
+      () {
+    final short = Tspl.titleFit('Coke');
+    expect(short.font, '2');
+    expect(short.lines, ['COKE']);
+    final mid = Tspl.titleFit('C9 Artisan Roast Turkey Club Wrap');
+    expect(mid.font, '1');
+    expect(mid.lines.single,
+        'C9 ARTISAN ROAST TURKEY CLUB WRAP');
+    final long = Tspl.titleFit(
+        'Extra Long Product Name That Keeps Going Past Forty Four Chars');
+    expect(long.font, '1');
+    expect(long.lines.single.endsWith('…'), isTrue);
   });
 
   test('logo bitmap centers and packs bits MSB-first', () {

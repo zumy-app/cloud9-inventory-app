@@ -136,6 +136,64 @@ class Tspl {
     return lines;
   }
 
+  /// Verification chip text ('VERIF: 10/24'). An explicit [override]
+  /// wins; empty auto-stamps the current MM/YY so the compliance chip
+  /// never renders blank. Preview and the composer share this, so the
+  /// stamp agrees wherever the label is drawn.
+  static String verifyText(String override, [DateTime? now]) {
+    final o = override.trim().toUpperCase();
+    if (o.isNotEmpty) return 'VERIF: $o';
+    final n = now ?? DateTime.now();
+    final mm = n.month.toString().padLeft(2, '0');
+    final yy = (n.year % 100).toString().padLeft(2, '0');
+    return 'VERIF: $mm/$yy';
+  }
+
+  /// Header slot-code lines: split on newline, trimmed, max 2.
+  /// ('MK-203D\nST-084' -> ['MK-203D', 'ST-084']). Shared so preview
+  /// and print wrap identically.
+  static List<String> slotLines(String slot) => slot
+      .split('\n')
+      .map((s) => s.trim().toUpperCase())
+      .where((s) => s.isNotEmpty)
+      .take(2)
+      .toList();
+
+  /// Store-code micro text for the header right ('C9-GROC').
+  /// Provisional mapping (see docs/06): uppercased category shortcode.
+  /// '' when there is no category (caller hides the element).
+  static String storeCode(String category) {
+    final alnum = category
+        .trim()
+        .toUpperCase()
+        .replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    if (alnum.isEmpty) return '';
+    return 'C9-${alnum.substring(0, alnum.length.clamp(0, 8))}';
+  }
+
+  /// Shelf-location line: explicit [shelfLoc] wins, else the category,
+  /// else '' (caller hides the element).
+  static String shelfLine(String shelfLoc, String category) {
+    final s = shelfLoc.trim();
+    if (s.isNotEmpty) return s.toUpperCase();
+    return category.trim().toUpperCase();
+  }
+
+  /// Title fit for the Type 01 single-line title: names up to 30
+  /// chars print at TSC font 2; longer names (up to 44 chars) drop to
+  /// font 1 instead of truncating into '...' while space remains.
+  /// Preview mirrors both tiers so print and screen agree on content.
+  static ({String font, List<String> lines}) titleFit(String displayName) {
+    final flat =
+        displayName.toUpperCase().replaceAll(RegExp(r'\s+'), ' ');
+    final t1 = titleLines(displayName, maxChars: 30, maxLines: 1);
+    if (t1.join(' ').length >= flat.length) return (font: '2', lines: t1);
+    return (
+      font: '1',
+      lines: titleLines(displayName, maxChars: 44, maxLines: 1)
+    );
+  }
+
   /// Unit-price micro text ("$0.90 / OZ") from price + parsed size qty.
   /// Null when the size carries no usable qty (cell omitted, no gap).
   static String? unitPriceText(double price, String size) {
@@ -249,8 +307,12 @@ class Tspl {
     return sb.toString();
   }
 
-  /// Type 01 standard retail (wireframe ..._standard_retail_everyday):
-  /// logo header + title block + split barcode/price-hero lower zone.
+  /// Type 01 standard retail (wireframe type01-mockup.html):
+  /// logo+slot header, shelf/VERIF header right, single-line title,
+  /// subtitle/TAXABLE row, EVERYDAY RETAIL knockout + DEPT row, split
+  /// barcode/unit-knockout bay + price hero, GS1 bottom band.
+  /// Knockouts print TEXT then REVERSE so a firmware that ignores
+  /// REVERSE still shows readable black-on-white.
   static String _composeStandard(
     LabelModel m, {
     int density = 8,
@@ -262,49 +324,80 @@ class Tspl {
     const right = widthDots - marginDots;
     var y = 2;
 
-    // Header: enlarged oval left (~150px crop), metadata right.
+    // Header: enlarged oval left, slot codes beside it, shelf + VERIF
+    // knockout + store code right.
+    final slotX =
+        (logoMono != null && logoWidth > 0) ? left + 160 : left;
     if (logoMono != null && logoWidth > 0) {
       final crop = cropCenter(logoMono, logoWidth, 150);
       _bitmap(sb, crop.mono, crop.width, left, y);
     }
-    final cat = _q(m.category.trim().toUpperCase());
-    if (cat.isNotEmpty) {
-      final cx = right - cat.length * _font1CharDots;
-      sb.writeln('TEXT $cx,$y,"1",0,1,1,"$cat"');
+    final slotLs = slotLines(m.slot);
+    for (var i = 0; i < slotLs.length; i++) {
+      sb.writeln('TEXT $slotX,${y + i * 12},"1",0,1,1,"${_q(slotLs[i])}"');
     }
-    final sku =
-        _q((m.defaultCode.trim().isNotEmpty ? 'SKU: ${m.defaultCode.trim()}' : '')
-            .toUpperCase());
-    if (sku.isNotEmpty) {
-      final sx = right - sku.length * _font1CharDots;
-      sb.writeln('TEXT $sx,${y + 12},"1",0,1,1,"$sku"');
+    final shelf = _q(shelfLine(m.shelfLoc, m.category));
+    if (shelf.isNotEmpty) {
+      final cx = right - shelf.length * _font1CharDots;
+      sb.writeln('TEXT $cx,$y,"1",0,1,1,"$shelf"');
+    }
+    final verif = _q(verifyText(m.verifyDate));
+    final vw = verif.length * _font1CharDots + 16;
+    final vx = (right - vw).clamp(left, widthDots);
+    sb.writeln('TEXT ${vx + 8},${y + 13},"1",0,1,1,"$verif"');
+    sb.writeln('REVERSE $vx,${y + 11},$vw,15');
+    final scode = _q(storeCode(m.category));
+    if (scode.isNotEmpty) {
+      final sx = (vx - scode.length * _font1CharDots - 8)
+          .clamp(left, widthDots);
+      sb.writeln('TEXT $sx,${y + 14},"1",0,1,1,"$scode"');
     }
     y += 30;
     sb.writeln('BAR $left,$y,${right - left},1');
     y += 5;
 
-    // Title block: full-width uppercase, up to 2 wrapped lines + micro.
-    final title = titleLines(m.displayName, maxChars: 28);
-    for (final line in title) {
-      sb.writeln('TEXT $left,$y,"2",0,1,1,"${_q(line)}"');
-      y += 21;
+    // Title block: single uppercase line via titleFit (font 2 to 30
+    // chars, font 1 micro to 44) + subtitle/allergen micro + TAXABLE.
+    final spec = titleFit(m.displayName);
+    for (final line in spec.lines) {
+      sb.writeln('TEXT $left,$y,"${spec.font}",0,1,1,"${_q(line)}"');
+      y += spec.font == '2' ? 21 : 13;
     }
     final subBits = [
       if (m.size.trim().isNotEmpty) m.size.trim().toUpperCase(),
-      if (m.category.trim().isNotEmpty) m.category.trim().toUpperCase(),
+      if (m.allergens.trim().isNotEmpty) m.allergens.trim().toUpperCase(),
     ];
-    if (subBits.isNotEmpty) {
-      sb.writeln('TEXT $left,$y,"1",0,1,1,"${_q(subBits.join(' • '))}"');
+    if (subBits.isNotEmpty || m.taxable) {
+      if (subBits.isNotEmpty) {
+        sb.writeln('TEXT $left,$y,"1",0,1,1,"${_q(subBits.join(' • '))}"');
+      }
+      if (m.taxable) {
+        const chip = 'TAXABLE';
+        final cw = chip.length * _font1CharDots + 16;
+        final cx = (right - cw).clamp(left, widthDots);
+        sb.writeln('BOX $cx,${y - 1},$cw,13,1');
+        sb.writeln('TEXT ${cx + 8},${y + 1},"1",0,1,1,"$chip"');
+      }
       y += 13;
     }
     sb.writeln('BAR $left,$y,${right - left},1');
     y += 5;
 
-    // Lower split: barcode bay | price hero. Fixed block y..y+92 so
-    // two-line titles (worst case y=97) end at 189, inside 200 dots.
+    // EVERYDAY RETAIL knockout + DEPT row.
+    const badge = 'EVERYDAY RETAIL';
+    final bw = badge.length * _font2CharDots + 16;
+    sb.writeln('TEXT ${left + 8},$y,"2",0,1,1,"$badge"');
+    sb.writeln('REVERSE $left,$y,$bw,17');
+    if (m.dept.trim().isNotEmpty) {
+      final dt = _q('DEPT ${m.dept.trim().toUpperCase()}');
+      sb.writeln(
+          'TEXT ${right - dt.length * _font1CharDots},${y + 3},"1",0,1,1,"$dt"');
+    }
+    y += 18;
+
+    // Lower split: barcode bay | price hero.
     const splitX = 230;
-    const blockH = 92;
-    sb.writeln('BAR $splitX,$y,1,$blockH');
+    sb.writeln('BAR $splitX,$y,1,80');
     final norm = normalizeCode(m.code);
     if (norm.digits.isNotEmpty) {
       var narrow = 2;
@@ -315,7 +408,7 @@ class Tspl {
       }
       final bayCx = (left + splitX) ~/ 2;
       final bx = (bayCx - est ~/ 2).clamp(left, widthDots);
-      const barcodeH = 56;
+      const barcodeH = 50;
       final by = (y + 2).clamp(0, heightDots - barcodeH - 4);
       sb.writeln(
           'BARCODE $bx,$by,"${norm.symbology}",$barcodeH,0,0,$narrow,$narrow,"${_q(norm.digits)}"');
@@ -325,15 +418,19 @@ class Tspl {
       sb.writeln('TEXT $dx,${by + barcodeH + 2},"1",0,1,1,"$digits"');
       final unit = unitPriceText(m.price, m.size);
       if (unit != null) {
-        final uw = unit.length * _font1CharDots + 16;
+        final cell = 'UNIT PRICE: $unit';
+        final uw = cell.length * _font1CharDots + 16;
         final ux = (bayCx - uw ~/ 2).clamp(left, widthDots);
         final uy = by + barcodeH + 16;
-        sb.writeln('BOX $ux,$uy,$uw,13,1');
-        sb.writeln(
-            'TEXT ${ux + 8},${uy + 2},"1",0,1,1,"${_q(unit)}"');
+        sb.writeln('TEXT ${ux + 8},${uy + 2},"1",0,1,1,"${_q(cell)}"');
+        sb.writeln('REVERSE $ux,$uy,$uw,13');
       }
     } else {
-      sb.writeln('TEXT $left,${y + 30},"2",0,1,1,"NO BARCODE"');
+      sb.writeln('TEXT $left,${y + 10},"2",0,1,1,"ADD BARCODE"');
+      if (m.defaultCode.trim().isNotEmpty) {
+        final sku = _q('SKU: ${m.defaultCode.trim().toUpperCase()}');
+        sb.writeln('TEXT $left,${y + 32},"1",0,1,1,"$sku"');
+      }
     }
 
     // Price hero (three-part lockup, right column centered).
@@ -344,17 +441,26 @@ class Tspl {
     final totalW = _font3CharDots + intW + parts.cents.length * _font3CharDots;
     final colCx = (splitX + right) ~/ 2;
     final px = (colCx - totalW ~/ 2).clamp(splitX + 2, widthDots);
-    final py = y + 8;
+    final py = y + 6;
     sb.writeln('TEXT $px,${py + 10},"3",0,1,1,"\$"');
     sb.writeln(
         'TEXT ${px + _font3CharDots},$py,"$intFont",0,1,1,"${parts.intPart}"');
     sb.writeln(
         'TEXT ${px + _font3CharDots + intW},${py + 12},"3",0,1,1,"${parts.cents}"');
-    const chip = 'RETAIL';
-    final chipW = chip.length * _font1CharDots + 16;
-    final chipX = (colCx - chipW ~/ 2).clamp(splitX + 2, widthDots);
-    sb.writeln('BOX $chipX,${py + 58},$chipW,13,1');
-    sb.writeln('TEXT ${chipX + 8},${py + 60},"1",0,1,1,"$chip"');
+    if (m.eachText.trim().isNotEmpty) {
+      final et = _q(m.eachText.trim().toUpperCase());
+      sb.writeln(
+          'TEXT ${px + _font3CharDots + intW},${py + 28},"1",0,1,1,"$et"');
+    }
+
+    // GS1 bottom band at a fixed row (lower block ends above it — see
+    // the debug assert). TEXT then REVERSE: readable either way.
+    const gs1 = 'GS1 COMPLIANT SHELF EDGE';
+    final gx = ((widthDots - gs1.length * _font1CharDots) ~/ 2)
+        .clamp(left, widthDots);
+    sb.writeln('TEXT $gx,187,"1",0,1,1,"$gs1"');
+    sb.writeln('REVERSE 0,185,$widthDots,15');
+    assert(y + 80 <= 184, 'Type 01 lower block overruns the GS1 band');
 
     sb.writeln('PRINT ${m.copies < 1 ? 1 : m.copies}');
     return sb.toString();
