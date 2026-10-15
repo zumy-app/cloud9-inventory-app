@@ -86,7 +86,7 @@ class _StandardPreview extends StatelessWidget {
         : (compact ? 9 : 13);
     final double heroInt = compact ? 22 : 64;
     final double heroSmall = compact ? 10 : 26;
-    final double logoH = compact ? 18 : 36;
+    final double logoH = compact ? 22 : 44;
     return AspectRatio(
       aspectRatio: 2 / 1,
       child: Container(
@@ -103,7 +103,7 @@ class _StandardPreview extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Image.asset(
-                  'assets/logo.png',
+                  'assets/cloud_9_kitchen_market_logo.png',
                   height: logoH,
                   fit: BoxFit.contain,
                   errorBuilder: (ctx, err, stack) => Text(
@@ -519,7 +519,7 @@ class _RapidPreview extends StatelessWidget {
                     ),
                   ),
                   Image.asset(
-                    'assets/logo.png',
+                    'assets/cloud_9_kitchen_market_logo.png',
                     height: compact ? 12 : 18,
                     fit: BoxFit.contain,
                     errorBuilder: (ctx, err, stack) => const SizedBox(),
@@ -675,7 +675,7 @@ class _PromoPreview extends StatelessWidget {
               child: Row(
                 children: [
                   Image.asset(
-                    'assets/logo.png',
+                    'assets/cloud_9_kitchen_market_logo.png',
                     height: compact ? 10 : 14,
                     fit: BoxFit.contain,
                     errorBuilder: (ctx, err, stack) => const SizedBox(),

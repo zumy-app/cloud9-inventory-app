@@ -67,9 +67,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # Brand logo (Cloud9 TEAM oval) — also the launcher icon source.
+  # Brand logos: TEAM oval = app chrome (login/home); Kitchen & Market
+  # oval = shelf labels only (preview + thermal BITMAP).
   assets:
     - assets/logo.png
+    - assets/cloud_9_kitchen_market_logo.png
 
   # Label preview typography (wireframe DESIGN.md tokens, OFL-licensed
   # Google Fonts, bundled so previews render offline in the store).

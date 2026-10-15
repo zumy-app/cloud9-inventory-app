@@ -1,5 +1,6 @@
 // 1-bit logo raster for 2"x1" thermal labels.
-// Decodes assets/logo.png, downscales to the TSPL dot budget
+// Decodes the Kitchen & Market label logo, downscales to the TSPL dot
+// budget
 // (Tspl.maxLogoWidthDots x Tspl.maxLogoHeightDots), Floyd-Steinberg
 // dithers to 1-bit, caches in memory. Failures return null so labels
 // print without a logo instead of crashing.
@@ -83,9 +84,11 @@ class LogoRaster {
     return s >= 1.0 ? 1.0 : s;
   }
 
-  /// Load + rasterize the bundled store logo (cached per max-size).
+  /// Load + rasterize the bundled label logo (cached per max-size).
+  /// Labels always use the Kitchen & Market oval; the TEAM oval stays
+  /// on app chrome (login/home) only.
   static Future<({List<int> mono, int width, int height})?> bundled({
-    String asset = 'assets/logo.png',
+    String asset = 'assets/cloud_9_kitchen_market_logo.png',
     int maxWidth = Tspl.maxLogoWidthDots,
     int maxHeight = Tspl.maxLogoHeightDots,
   }) async {
