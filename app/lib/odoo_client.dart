@@ -1144,89 +1144,130 @@ class OdooClient {
     }).toList();
   }
 
-  /// Full native sale: order + payments + paid. Returns server receipt data.
+  /// Full native sale via the frontend's own sync endpoint
+  /// (`pos.order/create_from_ui`) — the path web POS uses daily, so custom
+  /// required fields (e.g. amount_tax) are satisfied exactly like prod.
+  /// Returns server receipt data. Single call, never retried internally:
+  /// a retry with a new uuid would double-charge.
   /// Throws with a clear message at the failing step; a draft order left
   /// behind can always be paid/voided at the register — never silent.
   Future<PosReceipt> posCheckout({
     required int sessionId,
     required List<PosCartLine> lines,
     required List<PosTender> tenders,
+    double? amountTax,
   }) async {
     if (lines.isEmpty) throw OdooException('Cart is empty.');
     final tendered = tenders.fold(0.0, (a, t) => a + t.amount);
     if (tendered <= 0) throw OdooException('Enter a payment amount.');
-    int orderId;
-    try {
-      orderId = await callKw('pos.order', 'create', [
-        {
-          // NOTE: the field is session_id (not pos_session_id) — the
-          // latter throws "Invalid field" and aborts the whole sale.
-          'session_id': sessionId,
-          'lines': [
-            for (final l in lines)
-              [
-                0,
-                0,
-                {
-                  'product_id': l.productId,
-                  'qty': l.qty,
-                  'price_unit': l.priceUnit,
-                  'discount': 0,
-                  'tax_ids': [
-                    [6, 0, l.taxIds]
-                  ],
-                }
+    // Local estimate (server recomputes authoritatively).
+    double tax = amountTax ?? 0;
+    double untaxed = 0;
+    for (final l in lines) {
+      untaxed += l.qty * l.priceUnit;
+    }
+    final total = untaxed + tax;
+    if (amountTax == null) {
+      // No tax table handy — still send a complete dict; server computes.
+      tax = 0;
+    }
+    final change = tendered - total;
+    final uuid = _newUuid();
+    final now = _odooTs(DateTime.now());
+    final orderDict = <String, dynamic>{
+      'name': 'Mobile/${DateTime.now().millisecondsSinceEpoch}',
+      'uuid': uuid,
+      'session_id': sessionId,
+      'partner_id': false,
+      'to_invoice': false,
+      'amount_total': _round2(total),
+      'amount_tax': _round2(tax),
+      'amount_paid': _round2(tendered),
+      'amount_return': _round2(change < 0 ? 0 : change),
+      'lines': [
+        for (final l in lines)
+          [
+            0,
+            0,
+            {
+              'uuid': _newUuid(),
+              'product_id': l.productId,
+              'qty': l.qty,
+              'price_unit': l.priceUnit,
+              'discount': 0,
+              'tax_ids': [
+                [6, 0, l.taxIds]
               ],
+              'price_subtotal': _round2(l.qty * l.priceUnit),
+              'price_subtotal_incl':
+                  _round2(l.qty * l.priceUnit + _lineTax(l, tax, untaxed)),
+            }
           ],
-        }
-      ]) as int;
-    } catch (e) {
-      throw OdooException('Could not create the sale: ${_short(e)}');
-    }
+      ],
+      'payment_ids': [
+        for (final t in tenders)
+          [
+            0,
+            0,
+            {
+              'uuid': _newUuid(),
+              'amount': t.amount,
+              'payment_method_id': t.methodId,
+              'name': 'Mobile/${t.methodId}',
+              'payment_date': now,
+            }
+          ],
+      ],
+    };
+    dynamic result;
     try {
-      for (final t in tenders) {
-        await callKw('pos.payment', 'create', [
-          {
-            'pos_order_id': orderId,
-            'amount': t.amount,
-            'payment_method_id': t.methodId,
-          }
-        ]);
-      }
-    } catch (e) {
-      throw OdooException(
-          'Order #$orderId saved as DRAFT (pay it at the register). Payment failed: ${_short(e)}');
-    }
-    try {
-      await callKw('pos.order', 'action_pos_order_paid', [
-        [orderId]
+      result = await callKw(
+          'pos.order', 'create_from_ui', [
+        [orderDict],
+        false,
       ]);
     } catch (e) {
-      throw OdooException(
-          'Order #$orderId saved as DRAFT (pay it at the register). Validate failed: ${_short(e)}');
+      throw OdooException('Could not create the sale: ${_full(e)}');
     }
-    // Server totals are authoritative for the receipt.
+    final orderId = _asOrderId(result);
+    if (orderId == null) {
+      throw OdooException(
+          'Sale not confirmed by server (response: ${_short(result)}). Check the register before retrying — do NOT rescan to avoid a duplicate.');
+    }
+    // create_from_ui already pays non-draft orders; verify and read back.
     String ref = '#$orderId';
-    double total = 0;
+    double serverTotal = total;
+    String state = '';
     try {
       final read = await callKw('pos.order', 'read', [
         [orderId],
-        ['pos_reference', 'amount_total'],
+        ['pos_reference', 'amount_total', 'state'],
       ]) as List;
       if (read.isNotEmpty) {
         final m = (read.first as Map).cast<String, dynamic>();
         ref = (m['pos_reference'] ?? ref).toString();
         if (m['amount_total'] is num) {
-          total = (m['amount_total'] as num).toDouble();
+          serverTotal = (m['amount_total'] as num).toDouble();
         }
+        state = (m['state'] ?? '').toString();
       }
     } catch (_) {}
+    if (state.isNotEmpty && state != 'paid') {
+      try {
+        await callKw('pos.order', 'action_pos_order_paid', [
+          [orderId]
+        ]);
+      } catch (e) {
+        throw OdooException(
+            'Order $ref saved as DRAFT (pay it at the register). Validate failed: ${_short(e)}');
+      }
+    }
     return PosReceipt(
         orderId: orderId,
         reference: ref,
-        total: total,
+        total: serverTotal,
         tendered: tendered,
-        change: tendered - total);
+        change: tendered - serverTotal);
   }
 
   String _posUnavailable(Object e) {
@@ -1234,10 +1275,42 @@ class OdooClient {
     return 'POS_UNAVAILABLE: $m';
   }
 
+  double _round2(double v) => (v * 100).round() / 100.0;
+
+  /// Pro-rata share of the order tax for one line (local estimate only).
+  double _lineTax(PosCartLine l, double orderTax, double orderUntaxed) {
+    if (orderTax <= 0 || orderUntaxed <= 0) return 0;
+    return orderTax * (l.qty * l.priceUnit) / orderUntaxed;
+  }
+
+  /// uuid v4-ish without a new dependency (unique per attempt — the
+  /// server dedupes on it, so a retry never double-charges).
+  String _newUuid() {
+    final r = DateTime.now().microsecondsSinceEpoch;
+    final h = r.toRadixString(16).padLeft(12, '0');
+    return '${h.substring(0, 8)}-${h.substring(8, 12)}-4${(r % 4096).toRadixString(16).padLeft(3, '0')}-8${(r % 4096).toRadixString(16).padLeft(3, '0')}-${h.padLeft(12, '0')}';
+  }
+
+  /// create_from_ui returns [ids] (or a single id). Anything else is
+  /// treated as unconfirmed — never guess an order id.
+  int? _asOrderId(dynamic result) {
+    if (result is int) return result;
+    if (result is List && result.isNotEmpty && result.first is num) {
+      return (result.first as num).toInt();
+    }
+    if (result is Map && result['id'] is num) {
+      return (result['id'] as num).toInt();
+    }
+    return null;
+  }
+
   String _short(Object e) {
     final m = e is OdooException ? e.message : e.toString();
     return m.length > 220 ? '${m.substring(0, 220)}…' : m;
   }
+
+  /// Full server message (for the copyable error dialog — nothing hidden).
+  String _full(Object e) => e is OdooException ? e.message : e.toString();
 }
 
 /// Employee linked to the logged-in Odoo user.

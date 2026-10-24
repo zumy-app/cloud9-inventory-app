@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../i18n/lang.dart';
+import '../helcim_terminal.dart';
 import '../odoo_client.dart';
+import '../session_store.dart';
 import '../widgets/feedback.dart';
 import 'scan.dart';
 
@@ -48,11 +50,18 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
   @override
   void initState() {
     super.initState();
+    HelcimStore.instance.addListener(_refresh);
+    HelcimStore.instance.load();
     _boot();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    HelcimStore.instance.removeListener(_refresh);
     _search.dispose();
     _tender.dispose();
     super.dispose();
@@ -208,6 +217,14 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
       return;
     }
     final terminal = _selectedMethod?.terminal ?? '';
+    final helcimReady =
+        terminal.isNotEmpty && HelcimStore.instance.isConfigured;
+    if (helcimReady) {
+      // Auto-push: total goes to the physical terminal first; the Odoo
+      // payment is only recorded after the customer approves there.
+      await _pushThenRecord(s, mid, total, tendered, terminal);
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -250,6 +267,7 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
                 taxIds: c.product.taxIds))
             .toList(),
         tenders: [PosTender(methodId: mid, amount: tendered)],
+        amountTax: _totals.tax,
       );
       if (!mounted) return;
       setState(() {
@@ -261,10 +279,192 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
     } on OdooException catch (e) {
       if (!mounted) return;
       setState(() => _err = _friendly(e.message));
-      showErr(context, _friendly(e.message));
+      _showFullError(_friendly(e.message), e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Helcim auto-push: POST the total to the terminal, wait for the
+  /// customer to approve on the device, then record the payment in Odoo.
+  /// Cancel on either side leaves NO Odoo record — nothing to void.
+  Future<void> _pushThenRecord(PosSession s, int methodId, double total,
+      double tendered, String terminal) async {
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    HelcimPushResult push;
+    try {
+      final token = await SessionStore.loadHelcimToken() ?? '';
+      push = await helcimPushPurchase(
+        apiToken: token,
+        deviceCode: HelcimStore.instance.deviceCode,
+        amount: total,
+        currency: HelcimStore.instance.currency,
+        invoiceNumber: 'POS-${DateTime.now().millisecondsSinceEpoch}',
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    if (!push.accepted) {
+      setState(() => _err = push.message);
+      showErr(context, push.message);
+      return;
+    }
+    // Terminal is lit — cashier watches the device, then records.
+    final approved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => AlertDialog(
+        title: Text(t('pos_helcim_wait_title')),
+        content: Text(Lang.instance.f('pos_helcim_wait_body', {
+          'total': total.toStringAsFixed(2),
+          'terminal': terminal,
+        })),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: Text(t('pos_helcim_cancelled'))),
+          FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: Colors.green.shade700),
+              onPressed: () => Navigator.pop(c, true),
+              child: Text(t('pos_helcim_approved'))),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    try {
+      final receipt = await widget.client.posCheckout(
+        sessionId: s.id,
+        lines: _cart
+            .map((c) => PosCartLine(
+                productId: c.product.id,
+                qty: c.qty,
+                priceUnit: c.product.listPrice,
+                taxIds: c.product.taxIds))
+            .toList(),
+        tenders: [PosTender(methodId: methodId, amount: tendered)],
+        amountTax: _totals.tax,
+      );
+      if (!mounted) return;
+      setState(() {
+        _receipt = receipt;
+        _cart.clear();
+        _tender.clear();
+      });
+      showOk(context, t('pos_paid_ok'));
+    } on OdooException catch (e) {
+      if (!mounted) return;
+      setState(() => _err = _friendly(e.message));
+      _showFullError(_friendly(e.message), e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Manager setup: Helcim device code + currency + API token (secure).
+  Future<void> _helcimSetup() async {
+    final store = HelcimStore.instance;
+    final codeCtl = TextEditingController(text: store.deviceCode);
+    final tokenCtl = TextEditingController();
+    String curr = store.currency;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: Text(t('pos_helcim_title')),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(t('pos_helcim_help'),
+                    style:
+                        const TextStyle(color: Colors.grey, fontSize: 12)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: codeCtl,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: InputDecoration(
+                      labelText: t('pos_helcim_device')),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: curr,
+                  decoration: InputDecoration(
+                      labelText: t('pos_helcim_currency')),
+                  items: const ['USD', 'CAD']
+                      .map((x) =>
+                          DropdownMenuItem(value: x, child: Text(x)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setD(() => curr = v);
+                  },
+                ),
+                TextField(
+                  controller: tokenCtl,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                      labelText: t('pos_helcim_token'),
+                      hintText: store.hasToken
+                          ? t('pos_helcim_token_set')
+                          : t('pos_helcim_token_hint')),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            if (store.hasToken)
+              TextButton(
+                  onPressed: () async {
+                    await store.clearToken();
+                    if (context.mounted) Navigator.pop(c, false);
+                  },
+                  child: Text(t('pos_helcim_clear'))),
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: Text(t('waste_cancel'))),
+            FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: Text(t('batch_save'))),
+          ],
+        ),
+      ),
+    );
+    if (saved == true && mounted) {
+      await store.save(
+          token: tokenCtl.text, device: codeCtl.text, curr: curr);
+    }
+  }
+  void _showFullError(String short, String full) {
+    showErr(context, short);
+    if (full == short || full.isEmpty) return;
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(t('pos_err_detail_title')),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(child: SelectableText(full)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: full));
+                Navigator.pop(c);
+              },
+              child: Text(t('pos_copy'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(c),
+              child: Text(t('waste_cancel'))),
+        ],
+      ),
+    );
   }
 
   @override
@@ -275,6 +475,13 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
         title: Text(t('pos_title')),
         backgroundColor: const Color(0xFFF26522),
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.terminal_outlined),
+            tooltip: t('pos_helcim_setup'),
+            onPressed: _helcimSetup,
+          ),
+        ],
       ),
       body: Column(
         children: [

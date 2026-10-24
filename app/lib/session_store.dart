@@ -9,6 +9,7 @@ class SessionStore {
   static const _kUser = 'odoo_user';
   static const _kPass = 'odoo_password';
   static const _kDb = 'odoo_db';
+  static const _kHelcimToken = 'helcim_api_token';
   static const _kLastPosCat = 'last_pos_categ_id';
 
   static const storage = FlutterSecureStorage();
@@ -40,6 +41,28 @@ class SessionStore {
     await storage.delete(key: _kUser);
     await storage.delete(key: _kPass);
     await storage.delete(key: _kDb);
+  }
+
+  /// Helcim API token (payout-capable secret — secure storage only, never
+  /// logged, never in prefs/backups). Wiped on explicit clear in POS setup.
+  static Future<void> saveHelcimToken(String token) async {
+    await storage.write(key: _kHelcimToken, value: token);
+  }
+
+  static Future<String?> loadHelcimToken() async {
+    try {
+      final t = await storage.read(key: _kHelcimToken).timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => null,
+          );
+      return (t == null || t.isEmpty) ? null : t;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> clearHelcimToken() async {
+    await storage.delete(key: _kHelcimToken);
   }
 
   static const _kLang = 'app_lang'; // 'en' | 'es', null = follow device

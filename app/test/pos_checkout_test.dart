@@ -147,28 +147,20 @@ void main() {
     expect(await c.openPosSession(1), isNull);
   });
 
-  // ---- Integration: full checkout sequence ----
-  test('integration: checkout creates order, payment, pays, reads receipt',
+  // ---- Integration: full checkout via create_from_ui ----
+  test('integration: checkout posts complete UI dict and reads receipt',
       () async {
     final calls = <String>[];
-    String createBody = '';
+    String uiBody = '';
     final mock = MockClient((req) async {
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       final params = body['params'] as Map<String, dynamic>;
       final key = "${params['model']}/${params['method']}";
       calls.add(key);
-      if (key == 'pos.order/create') {
-        createBody = req.body;
+      if (key == 'pos.order/create_from_ui') {
+        uiBody = req.body;
         return http.Response(
-            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': 101}), 200);
-      }
-      if (key == 'pos.payment/create') {
-        return http.Response(
-            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': 201}), 200);
-      }
-      if (key == 'pos.order/action_pos_order_paid') {
-        return http.Response(
-            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': [101]}), 200);
       }
       if (key == 'pos.order/read') {
         return http.Response(
@@ -176,7 +168,12 @@ void main() {
               'jsonrpc': '2.0',
               'id': 1,
               'result': [
-                {'id': 101, 'pos_reference': 'Order 0001', 'amount_total': 8.0}
+                {
+                  'id': 101,
+                  'pos_reference': 'Order 0001',
+                  'amount_total': 8.0,
+                  'state': 'paid'
+                }
               ]
             }),
             200);
@@ -191,16 +188,87 @@ void main() {
         PosCartLine(productId: 10, qty: 2, priceUnit: 4.0, taxIds: [5])
       ],
       tenders: const [PosTender(methodId: 2, amount: 10.0)],
+      amountTax: 0,
     );
-    expect(calls, contains('pos.order/create'));
-    expect(calls, contains('pos.payment/create'));
-    expect(calls, contains('pos.order/action_pos_order_paid'));
-    // Regression (Pixel 2026-10-24): pos.order has NO pos_session_id field.
-    expect(createBody, contains('"session_id":9'));
-    expect(createBody, isNot(contains('pos_session_id')));
+    expect(calls, contains('pos.order/create_from_ui'));
+    expect(calls, isNot(contains('pos.order/create')));
+    // Regression (Pixel 2026-10-24): amount_tax must travel in the dict,
+    // with the frontend's payment key and uuids.
+    expect(uiBody, contains('amount_tax'));
+    expect(uiBody, contains('payment_ids'));
+    expect(uiBody, contains('"session_id":9'));
+    expect(uiBody, contains('"uuid"'));
     expect(r.reference, 'Order 0001');
     expect(r.total, 8.0);
     expect(r.change, closeTo(2.0, 0.001));
+  });
+
+  test('integration: draft state falls back to action_pos_order_paid',
+      () async {
+    final calls = <String>[];
+    final mock = MockClient((req) async {
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      final params = body['params'] as Map<String, dynamic>;
+      final key = "${params['model']}/${params['method']}";
+      calls.add(key);
+      if (key == 'pos.order/create_from_ui') {
+        return http.Response(
+            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': [101]}), 200);
+      }
+      if (key == 'pos.order/read') {
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': [
+                {
+                  'id': 101,
+                  'pos_reference': 'Order 0001',
+                  'amount_total': 8.0,
+                  'state': 'draft'
+                }
+              ]
+            }),
+            200);
+      }
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+    });
+    final c = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    await c.posCheckout(
+      sessionId: 9,
+      lines: const [PosCartLine(productId: 10, qty: 1, priceUnit: 8.0)],
+      tenders: const [PosTender(methodId: 2, amount: 8.0)],
+      amountTax: 0,
+    );
+    expect(calls, contains('pos.order/action_pos_order_paid'));
+  });
+
+  test('integration: unconfirmed server response never guesses an order id',
+      () async {
+    final mock = MockClient((req) async {
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      final params = body['params'] as Map<String, dynamic>;
+      if ("${params['model']}/${params['method']}" ==
+          'pos.order/create_from_ui') {
+        return http.Response(
+            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+      }
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+    });
+    final c = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    try {
+      await c.posCheckout(
+        sessionId: 9,
+        lines: const [PosCartLine(productId: 10, qty: 1, priceUnit: 4.0)],
+        tenders: const [PosTender(methodId: 2, amount: 4.0)],
+        amountTax: 0,
+      );
+      fail('expected throw');
+    } on OdooException catch (e) {
+      expect(e.message, contains('not confirmed'));
+    }
   });
 
   test('integration: terminal methods flagged (e.g. helcim)', () async {
@@ -230,17 +298,13 @@ void main() {
     expect(helcim.terminal, 'helcim');
   });
 
-  test('integration: payment failure keeps draft message, not silent',
+  test('integration: server field error surfaces in full (amount_tax case)',
       () async {
     final mock = MockClient((req) async {
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       final params = body['params'] as Map<String, dynamic>;
       final key = "${params['model']}/${params['method']}";
-      if (key == 'pos.order/create') {
-        return http.Response(
-            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': 101}), 200);
-      }
-      if (key == 'pos.payment/create') {
+      if (key == 'pos.order/create_from_ui') {
         return http.Response(
             jsonEncode({
               'jsonrpc': '2.0',
@@ -248,7 +312,10 @@ void main() {
               'error': {
                 'code': 200,
                 'message': 'Odoo Server Error',
-                'data': {'message': 'No payment method'}
+                'data': {
+                  'message':
+                      "The operation cannot be completed. Missing required value for the field 'Taxes Amount Tax' (amount_tax). Model: Point of Sale Orders (pos.order)"
+                }
               }
             }),
             200);
@@ -262,11 +329,12 @@ void main() {
         sessionId: 9,
         lines: const [PosCartLine(productId: 10, qty: 1, priceUnit: 4.0)],
         tenders: const [PosTender(methodId: 2, amount: 4.0)],
+        amountTax: 0,
       );
       fail('expected throw');
     } on OdooException catch (e) {
-      expect(e.message, contains('DRAFT'));
-      expect(e.message, contains('101'));
+      expect(e.message, contains('Could not create the sale'));
+      expect(e.message, contains('amount_tax'));
     }
   });
 }
