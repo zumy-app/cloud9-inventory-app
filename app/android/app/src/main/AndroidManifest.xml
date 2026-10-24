@@ -1,17 +1,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- Label printer (Classic SPP, OS-paired devices only — no scan). -->
+    <!-- Label printer (Classic SPP, OS-paired devices only — the app
+         never scans; print_bluetooth_thermal's native guard still
+         requires SCAN, so request it with neverForLocation to keep
+         location permission out of the flow). -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- Printing is optional; keep the app available on devices without BT. -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
     <application
         android:label="Cloud 9 Team"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

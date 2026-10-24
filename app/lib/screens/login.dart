@@ -7,6 +7,7 @@ import '../i18n/lang.dart';
 import '../odoo_client.dart';
 import '../session_store.dart';
 import '../widgets/lang_switch.dart';
+import 'privacy_policy.dart';
 
 class LoginScreen extends StatefulWidget {
   final OdooClient client;
@@ -130,6 +131,17 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 16),
               const Center(child: LangSwitch(compact: true)),
+              const SizedBox(height: 4),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PrivacyPolicyScreen(),
+                    ),
+                  ),
+                  child: Text(t('account_privacy')),
+                ),
+              ),
             ],
           ),
         ),

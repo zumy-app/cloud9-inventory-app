@@ -32,10 +32,17 @@ class SppTransport implements PrinterTransport {
     if (!_status.isClosed) _status.add(s);
   }
 
-  /// Guard chain shared by list/connect: permission → radio.
+  /// Guard chain shared by list/connect: permissions → radio.
+  ///
+  /// print_bluetooth_thermal requires BOTH CONNECT and SCAN on Android
+  /// 12+; a missing SCAN makes it report Bluetooth-off and hide paired
+  /// devices instead of throwing. SCAN is declared with
+  /// neverForLocation and is only used to satisfy that native guard —
+  /// this app never discovers devices.
   Future<void> _guard() async {
-    final perm = await Permission.bluetoothConnect.status;
-    if (!perm.isGranted) {
+    final connect = await Permission.bluetoothConnect.status;
+    final scan = await Permission.bluetoothScan.status;
+    if (!connect.isGranted || !scan.isGranted) {
       throw const PrinterException(PrinterFailure.notPermitted);
     }
     final on = await PrintBluetoothThermal.bluetoothEnabled;
@@ -58,6 +65,10 @@ class SppTransport implements PrinterTransport {
     if (mac.isEmpty) {
       throw const PrinterException(PrinterFailure.noPrinter);
     }
+    // connect() reopens the plugin socket unconditionally (it closes any
+    // existing stream first). Avoid that churn when we already hold the
+    // same printer; a stale socket is caught by the write retry path.
+    if (_connected && _address == mac) return;
     await _guard();
     // Fail fast with a named error when the radio sees bonds but not
     // ours (e.g. unpaired since save). An empty list means the query
@@ -91,12 +102,12 @@ class SppTransport implements PrinterTransport {
   }
 
   Future<void> _ensureConnected() async {
-    if (_connected) {
-      try {
-        if (await PrintBluetoothThermal.connectionStatus) return;
-      } catch (_) {}
-      _connected = false;
-    }
+    // Trust the connection flag. The plugin's connectionStatus probe
+    // writes a byte to the printer and closes the socket on any hiccup;
+    // on the PM-241Z that turned a good connection into an immediate
+    // reconnect that the printer refused. A genuinely dead socket is
+    // handled by _writeWithRetry's one reconnect instead.
+    if (_connected) return;
     final addr = _address;
     if (addr == null || addr.isEmpty) {
       throw const PrinterException(PrinterFailure.noPrinter);
@@ -108,7 +119,12 @@ class SppTransport implements PrinterTransport {
   Future<void> write(List<int> bytes) async {
     await _ensureConnected();
     try {
-      final ok = await PrintBluetoothThermal.writeBytes(bytes);
+      // Tspl.encode returns a Uint8List, which the standard method
+      // codec sends as byte[]. print_bluetooth_thermal casts arguments
+      // to List<Int> and silently returns false for byte[], so hand it
+      // a plain growable list.
+      final ok =
+          await PrintBluetoothThermal.writeBytes(List<int>.from(bytes));
       if (!ok) throw const PrinterException(PrinterFailure.writeFailed);
     } catch (e) {
       _connected = false;

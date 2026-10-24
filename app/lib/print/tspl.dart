@@ -231,7 +231,7 @@ class Tspl {
   }
 
   /// Pack 1-bit row-major pixels MSB-first (shared with band composers).
-  static String packHex(List<int> mono, int width) {
+  static List<int> packBytes(List<int> mono, int width) {
     final packed = <int>[];
     final rows = mono.length ~/ width;
     for (var r = 0; r < rows; r++) {
@@ -248,10 +248,13 @@ class Tspl {
       }
       if (bits > 0) packed.add(acc << (8 - bits));
     }
-    return packed
-        .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
-        .join();
+    return packed;
   }
+
+  /// Pack 1-bit row-major pixels MSB-first as an uppercase hex string.
+  static String packHex(List<int> mono, int width) => packBytes(mono, width)
+      .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+      .join();
 
   static void _bitmap(
     StringBuffer sb,
@@ -262,7 +265,11 @@ class Tspl {
   ) {
     final rows = mono.length ~/ width;
     final widthBytes = (width + 7) ~/ 8;
-    sb.writeln('BITMAP $x,$y,$widthBytes,$rows,1,${packHex(mono, width)}');
+    // Vendor TSPL sends raw binary raster bytes (not ASCII hex) and uses
+    // 1 = dark; ASCII hex is parsed as pixel data and prints as noise.
+    sb.write('BITMAP $x,$y,$widthBytes,$rows,0,');
+    sb.write(String.fromCharCodes(packBytes(mono, width)));
+    sb.writeln();
   }
 
   /// Compose one label, dispatching on [LabelModel.kind].
@@ -302,7 +309,8 @@ class Tspl {
     sb.writeln('SIZE 48 mm,25 mm');
     sb.writeln('GAP 3 mm,0');
     sb.writeln('DENSITY $density');
-    sb.writeln('DIRECTION 1');
+    sb.writeln('DIRECTION 0');
+    sb.writeln('REFERENCE 0,12');
     sb.writeln('CLS');
     return sb.toString();
   }
@@ -849,7 +857,8 @@ class Tspl {
     sb.writeln('SIZE 48 mm,25 mm');
     sb.writeln('GAP 3 mm,0');
     sb.writeln('DENSITY $density');
-    sb.writeln('DIRECTION 1');
+    sb.writeln('DIRECTION 0');
+    sb.writeln('REFERENCE 0,12');
     sb.writeln('CLS');
     sb.writeln('TEXT 10,8,"2",0,1,1,"CLOUD 9 TEST"');
     sb.writeln('TEXT 10,34,"1",0,1,1,"${_q(n)}"');

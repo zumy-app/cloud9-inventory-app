@@ -27,10 +27,14 @@ void say(String s) => print('[SPIKE] $s');
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    var perm = await Permission.bluetoothConnect.status;
-    if (!perm.isGranted) perm = await Permission.bluetoothConnect.request();
-    say('bluetoothConnect=$perm');
-    if (!perm.isGranted) throw StateError('permission denied');
+    final perms = await [
+      Permission.bluetoothConnect,
+      Permission.bluetoothScan,
+    ].request();
+    say('permissions=$perms');
+    if (perms.values.any((p) => !p.isGranted)) {
+      throw StateError('permission denied');
+    }
     say('bluetoothEnabled='
         '${await PrintBluetoothThermal.bluetoothEnabled}');
     final paired = await PrintBluetoothThermal.pairedBluetooths;

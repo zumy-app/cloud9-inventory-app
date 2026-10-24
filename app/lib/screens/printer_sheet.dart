@@ -76,13 +76,20 @@ class _PrinterSheetState extends State<_PrinterSheet>
       _err = null;
     });
     try {
-      final st = await Permission.bluetoothConnect.status;
+      // print_bluetooth_thermal checks CONNECT *and* SCAN on Android
+      // 12+, and hides failures by returning false/empty (which used to
+      // look like "Bluetooth off" / "no paired printers"). Treat either
+      // denial as the permission state.
+      final statuses = await Future.wait([
+        Permission.bluetoothConnect.status,
+        Permission.bluetoothScan.status,
+      ]);
       if (!mounted) return;
-      if (!st.isGranted) {
+      if (statuses.any((s) => !s.isGranted)) {
         setState(() {
           _loading = false;
           _perm = false;
-          _permLocked = st.isPermanentlyDenied;
+          _permLocked = statuses.any((s) => s.isPermanentlyDenied);
         });
         return;
       }
@@ -121,9 +128,12 @@ class _PrinterSheetState extends State<_PrinterSheet>
   }
 
   Future<void> _requestPerm() async {
-    final st = await Permission.bluetoothConnect.request();
+    final statuses = await [
+      Permission.bluetoothConnect,
+      Permission.bluetoothScan,
+    ].request();
     if (!mounted) return;
-    if (st.isPermanentlyDenied) {
+    if (statuses.values.any((s) => s.isPermanentlyDenied)) {
       await openAppSettings();
     }
     await _refresh();
@@ -135,7 +145,14 @@ class _PrinterSheetState extends State<_PrinterSheet>
         action: 'android.bluetooth.adapter.action.REQUEST_ENABLE',
       ).launch();
     } catch (_) {
-      // No BT-enable activity (or test env): resume-refresh covers it.
+      // Some OEMs have no enable dialog; fall back to BT settings.
+      try {
+        await const AndroidIntent(
+          action: 'android.settings.BLUETOOTH_SETTINGS',
+        ).launch();
+      } catch (_) {
+        // No activity available (or test env): resume-refresh covers it.
+      }
     }
     await Future.delayed(const Duration(seconds: 1));
     await _refresh();

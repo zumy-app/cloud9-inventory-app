@@ -644,14 +644,6 @@ class _BatchScreenState extends State<BatchScreen> {
             ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        tooltip: t('batch_new'),
-        child: const Icon(Icons.add),
-        onPressed: () async {
-          final n = await _askName(t('batch_new'));
-          if (n != null && n.isNotEmpty) store.create(n);
-        },
-      ),
     );
   }
 }

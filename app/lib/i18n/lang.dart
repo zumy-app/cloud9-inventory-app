@@ -90,8 +90,13 @@ class Lang extends ChangeNotifier {
     'account_user': 'User: {user}',
     'account_user_none': 'User: —',
     'account_db': 'DB: odoo',
+    'account_privacy': 'Privacy policy',
+    'account_version': 'Version {version}',
+    'account_managed_note':
+        'Accounts are managed by Cloud 9 Market. Contact your store administrator to request account deletion or a copy of your data.',
     'account_signout': 'Sign out',
-    'account_note': 'POC build. Online-only. Mistakes: fix in Odoo backend.',
+    'account_note':
+        'Online-only. Inventory changes sync with the Cloud 9 Odoo server.',
     'account_language': 'Language / Idioma',
     'account_language_note':
         'Changes buttons and instructions. Product names, labels and prices stay in English.',
@@ -424,9 +429,13 @@ class Lang extends ChangeNotifier {
     'account_user': 'Usuario: {user}',
     'account_user_none': 'Usuario: —',
     'account_db': 'BD: odoo',
+    'account_privacy': 'Política de privacidad',
+    'account_version': 'Versión {version}',
+    'account_managed_note':
+        'Las cuentas las administra Cloud 9 Market. Contacta a tu administrador para solicitar la eliminación de la cuenta o una copia de tus datos.',
     'account_signout': 'Cerrar sesión',
     'account_note':
-        'Versión de prueba. Solo en línea. Errores: corríjalos en Odoo.',
+        'Solo en línea. Los cambios de inventario se sincronizan con el servidor Odoo de Cloud 9.',
     'account_language': 'Language / Idioma',
     'account_language_note':
         'Cambia botones e instrucciones. Nombres, etiquetas y precios siguen en inglés.',

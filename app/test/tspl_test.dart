@@ -264,10 +264,10 @@ void main() {
 
   test('logo bitmap centers and packs bits MSB-first', () {
     const m = LabelModel(name: 'n', price: 1, barcode: '1');
-    // 8x1 all-black row -> one byte FF.
+    // 8x1 all-black row -> one raw byte FF (1 = dark on the wire).
     final out = Tspl.compose(m, logoMono: List.filled(8, 1), logoWidth: 8);
     expect(out, contains('BITMAP'));
-    expect(out, contains(',1,1,1,FF'));
+    expect(out, contains(',1,1,0,\u00FF'));
   });
 
   test('ticket is minimal: title, name, mac, one barcode', () {

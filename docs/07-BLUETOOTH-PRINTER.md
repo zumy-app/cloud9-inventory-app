@@ -67,6 +67,16 @@ New `SppTransport implements PrinterTransport`
   experiment, not prescription) only if the Phase-0 BITMAP shows
   dropped bytes. Single-flight queue in `PrinterService` stays
   unchanged.
+  * Gotcha: `Tspl.encode` returns a `Uint8List`; the standard method
+    codec ships that as `byte[]`, and `print_bluetooth_thermal` 1.2.5
+    casts arguments to `List<Int>` and returns `false` (no log) for
+    `byte[]`. Always pass `List<int>.from(bytes)` so the plugin sees an
+    `ArrayList` and actually writes.
+  * Do **not** call `PrintBluetoothThermal.connectionStatus` as a
+    pre-write health check: it writes a probe byte and closes the
+    socket on a hiccup, and the printer then refuses the immediate
+    reconnect. Trust the connected flag and let `_writeWithRetry`'
+    disconnect/reconnect cycle handle a stale socket.
 * Lifecycle: **connect on demand, stay connected, revalidate per
   batch.** Phomemos sleep and Android Dozes idle SPP sockets, so a
   blindly persistent socket goes stale. Design: before each
@@ -91,15 +101,21 @@ Manifest (no location permission by design):
 <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
     android:maxSdkVersion="30"/>
 <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+    android:usesPermissionFlags="neverForLocation"/>
 ```
 
-* No `BLUETOOTH_SCAN`, no `ACCESS_FINE_LOCATION`: the app only talks
-  to devices the user already bonded in Settings. This halves the
-  permission UX and the Play review surface.
+* No `ACCESS_FINE_LOCATION`, and no discovery scan: the app only talks
+  to devices the user already bonded in Settings. `BLUETOOTH_SCAN` is
+  requested solely because `print_bluetooth_thermal` 1.2.5's native
+  guard requires both CONNECT and SCAN; without it the plugin
+  silently reports "Bluetooth off" and an empty paired list
+  (`hciReason 102` re-pair noise is unrelated). `neverForLocation`
+  keeps it out of the location-permission flow.
 * Pre-31 devices fall back to the legacy flags (maxSdkVersion keeps
-  them off 31+). minSdk stays as-is; all CONNECT-gated calls go
+  them off 31+). minSdk stays as-is; all CONNECT/SCAN-gated calls go
   through `permission_handler` status checks first. Needs
-  compileSdk 31+ (already true on Flutter 3.44 defaults — confirm at
+  compileSdk 31+ (already true on Flutter 3.44 defaults - confirm at
   implementation).
 
 ## Phase 2 — printer management UI (Labels tab)
