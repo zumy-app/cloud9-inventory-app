@@ -691,4 +691,143 @@ class OdooClient {
     }
     return 0;
   }
+
+  /// Scrap location for waste/loss write-offs. Prefers a location flagged
+  /// scrap, falls back to a "Scrap" named location, then any inventory
+  /// location. Throws when none exists.
+  Future<int> scrapLocationId() async {
+    final flagged =
+        await callKw('stock.location', 'search_read', [], kwargs: {
+      'domain': [
+        ['scrap_location', '=', true]
+      ],
+      'fields': ['id'],
+      'limit': 1,
+    });
+    if ((flagged as List).isNotEmpty) {
+      return (((flagged).first as Map)['id'] as num).toInt();
+    }
+    final named =
+        await callKw('stock.location', 'search_read', [], kwargs: {
+      'domain': [
+        ['name', 'ilike', 'Scrap']
+      ],
+      'fields': ['id'],
+      'limit': 1,
+    });
+    if ((named as List).isNotEmpty) {
+      return (((named).first as Map)['id'] as num).toInt();
+    }
+    return _stockLocationId();
+  }
+
+  /// Lots for a storable product (for expiry-aware waste logging).
+  Future<List<StockLot>> findLots(int variantId, {int limit = 20}) async {
+    final result = await callKw('stock.lot', 'search_read', [], kwargs: {
+      'domain': [
+        ['product_id', '=', variantId]
+      ],
+      'fields': ['id', 'name', 'expiration_date'],
+      'limit': limit,
+      'order': 'expiration_date',
+    });
+    return (result as List).map((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      Object? exp = m['expiration_date'];
+      return StockLot(
+        id: (m['id'] as num).toInt(),
+        name: m['name']?.toString() ?? '',
+        expirationDate:
+            (exp == null || exp is bool) ? '' : exp.toString(),
+      );
+    }).toList();
+  }
+
+  /// Create + validate a scrap move for a waste/loss line.
+  /// Returns the scrap id and the frozen unit value Odoo applied.
+  /// Throws OdooException on failure (caller keeps an offline draft).
+  Future<ScrapResult> createScrap({
+    required InventoryProduct product,
+    required double qty,
+    int? lotId,
+    String origin = '',
+  }) async {
+    final q = qty;
+    if (q <= 0) throw OdooException('Scrap qty must be > 0');
+    final srcId = await _stockLocationId();
+    final dstId = await scrapLocationId();
+    final vals = <String, dynamic>{
+      'product_id': product.variantId,
+      'scrap_qty': q,
+      'location_id': srcId,
+      'scrap_location_id': dstId,
+      if (origin.trim().isNotEmpty) 'origin': origin.trim(),
+    };
+    if (lotId != null) vals['lot_id'] = lotId;
+    int scrapRecordId;
+    try {
+      scrapRecordId = await callKw('stock.scrap', 'create', [vals]) as int;
+    } catch (e) {
+      throw OdooException('Scrap not available in Odoo: $e');
+    }
+    try {
+      await callKw('stock.scrap', 'action_validate', [
+        [scrapRecordId]
+      ]);
+    } catch (_) {
+      // Some configs auto-validate on create; ignore.
+    }
+    double unitValue = product.standardPrice;
+    try {
+      final read = await callKw('stock.scrap', 'read', [
+        [scrapRecordId],
+        ['value', 'scrap_qty'],
+      ]) as List;
+      if (read.isNotEmpty) {
+        final m = (read.first as Map).cast<String, dynamic>();
+        final v = m['value'];
+        final sq = m['scrap_qty'];
+        if (v is num && sq is num && sq != 0) {
+          unitValue = (v / sq).toDouble();
+        }
+      }
+    } catch (_) {
+      // Keep standard_price fallback.
+    }
+    return ScrapResult(scrapId: scrapRecordId, unitValue: unitValue);
+  }
+
+  /// Attach a base64 photo to a validated scrap record (best-effort).
+  Future<void> attachScrapPhoto({
+    required int scrapId,
+    required String base64Image,
+    String filename = 'waste.jpg',
+  }) async {
+    await callKw('ir.attachment', 'create', [
+      {
+        'name': filename,
+        'res_model': 'stock.scrap',
+        'res_id': scrapId,
+        'type': 'binary',
+        'datas': base64Image,
+        'mimetype': 'image/jpeg',
+      }
+    ]);
+  }
+}
+
+/// Minimal lot view for waste logging.
+class StockLot {
+  final int id;
+  final String name;
+  final String expirationDate;
+  const StockLot(
+      {required this.id, required this.name, required this.expirationDate});
+}
+
+/// Result of a validated scrap write: server id + frozen unit value.
+class ScrapResult {
+  final int scrapId;
+  final double unitValue;
+  const ScrapResult({required this.scrapId, required this.unitValue});
 }

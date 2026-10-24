@@ -8,6 +8,7 @@ import '../odoo_client.dart';
 import 'add_item.dart';
 import 'browse.dart';
 import 'receive.dart';
+import 'waste.dart';
 
 class InventoryHome extends StatelessWidget {
   final OdooClient client;
@@ -62,6 +63,14 @@ class InventoryHome extends StatelessWidget {
                     client: client,
                     user: user,
                     initialMode: 'count')),
+          ),
+          _tile(
+            context,
+            icon: Icons.delete_outline,
+            title: t('home_waste'),
+            subtitle: t('home_waste_sub'),
+            onTap: () =>
+                _go(context, WasteScreen(client: client, user: user)),
           ),
         ],
       ),

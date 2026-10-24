@@ -9,3 +9,4 @@ Read in order. Start at 01, build 02, defer 03–04 until MVP is in the store.
 * `05-LABEL-PRINTING.md` — Bluetooth printing on Phomemo PM-241-BT (status + phases).
 * `06-TYPE01-LABEL-REDESIGN.md` — Type 01 retail-label redesign tech plan (approved mockup: `labels-wireframes/type01-mockup.html`). Build this now.
 * `07-BLUETOOTH-PRINTER.md` — Bluetooth printer plan (PM-241Z over Classic SPP): why the app can't see the OS-paired printer, transport, permissions, management UI, test plan.
+* `08-WASTE-LOSS-TRACKING-v2.md` — Waste/loss tracking (scrap-based, IRS-ready): append-only log, disposition-date tax rule, validation/lock, CSV exports. Build on `feature/waste-loss-v2`.
