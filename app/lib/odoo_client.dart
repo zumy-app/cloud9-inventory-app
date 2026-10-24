@@ -692,32 +692,47 @@ class OdooClient {
     return 0;
   }
 
-  /// Scrap location for waste/loss write-offs. Prefers a location flagged
-  /// scrap, falls back to a "Scrap" named location, then any inventory
-  /// location. Throws when none exists.
+  /// Scrap location for waste/loss write-offs.
+  /// NOTE (prod bug 2026-10-24): this Odoo DB has NO `scrap_location`
+  /// field on `stock.location` — querying it throws
+  /// "invalid field stock.location.scrap_location in condition".
+  /// So resolve purely by usage + name, each step guarded so one bad
+  /// domain can never sink the whole chain.
   Future<int> scrapLocationId() async {
-    final flagged =
-        await callKw('stock.location', 'search_read', [], kwargs: {
-      'domain': [
-        ['scrap_location', '=', true]
-      ],
-      'fields': ['id'],
-      'limit': 1,
-    });
-    if ((flagged as List).isNotEmpty) {
-      return (((flagged).first as Map)['id'] as num).toInt();
+    // 1. Inventory-usage location named like Scrap.
+    try {
+      final named =
+          await callKw('stock.location', 'search_read', [], kwargs: {
+        'domain': [
+          ['usage', '=', 'inventory'],
+          ['name', 'ilike', 'scrap'],
+        ],
+        'fields': ['id'],
+        'limit': 1,
+      });
+      if ((named as List).isNotEmpty) {
+        return (((named).first as Map)['id'] as num).toInt();
+      }
+    } catch (_) {
+      // Fall through to the next strategy.
     }
-    final named =
-        await callKw('stock.location', 'search_read', [], kwargs: {
-      'domain': [
-        ['name', 'ilike', 'Scrap']
-      ],
-      'fields': ['id'],
-      'limit': 1,
-    });
-    if ((named as List).isNotEmpty) {
-      return (((named).first as Map)['id'] as num).toInt();
+    // 2. Any inventory-usage location (virtual/scrap live here).
+    try {
+      final anyInv =
+          await callKw('stock.location', 'search_read', [], kwargs: {
+        'domain': [
+          ['usage', '=', 'inventory']
+        ],
+        'fields': ['id'],
+        'limit': 1,
+      });
+      if ((anyInv as List).isNotEmpty) {
+        return (((anyInv).first as Map)['id'] as num).toInt();
+      }
+    } catch (_) {
+      // Fall through.
     }
+    // 3. Last resort: the regular internal stock location.
     return _stockLocationId();
   }
 

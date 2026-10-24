@@ -174,8 +174,56 @@ void main() {
     expect(seen, contains('stock.scrap/action_validate'));
   });
 
-  test('integration: fetchScrapHistory parses server lines', () async {
+  test('regression: scrap location never queries invalid scrap_location field',
+      () async {
+    // Prod 2026-10-24: "invalid field stock.location.scrap_location in
+    // condition". Every location lookup must avoid that field and still
+    // resolve via usage + name with fallbacks.
+    final bodies = <String>[];
     final mock = MockClient((req) async {
+      bodies.add(req.body);
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      final params = body['params'] as Map<String, dynamic>;
+      final model = params['model'];
+      if (model == 'stock.location') {
+        final kwargs = params['kwargs'] as Map<String, dynamic>? ?? {};
+        final domain = (kwargs['domain'] ?? []).toString();
+        if (domain.contains('scrap') && domain.contains('inventory')) {
+          // No dedicated Scrap location on this DB.
+          return http.Response(
+              jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': []}), 200);
+        }
+        if (domain.contains('inventory')) {
+          return http.Response(
+              jsonEncode({
+                'jsonrpc': '2.0',
+                'id': 1,
+                'result': [
+                  {'id': 12}
+                ]
+              }),
+              200);
+        }
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': [
+                {'id': 8}
+              ]
+            }),
+            200);
+      }
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': []}), 200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    final id = await client.scrapLocationId();
+    expect(id, 12); // inventory-usage fallback, not the stock location
+    expect(bodies.join(), isNot(contains('scrap_location')));
+  });
+
+  test('integration: fetchScrapHistory parses server lines', () async {    final mock = MockClient((req) async {
       return http.Response(
           jsonEncode({
             'jsonrpc': '2.0',
