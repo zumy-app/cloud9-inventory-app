@@ -369,6 +369,53 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
     }
   }
 
+  /// Read-only probe of what THIS Odoo can drive: custom helcim/terminal
+  /// models + terminal-configured methods. Copy the report to support so
+  /// the exact server hook gets wired (no guessing, nothing written).
+  Future<void> _runProbe() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(children: [
+          const CircularProgressIndicator(),
+          const SizedBox(width: 16),
+          Expanded(child: Text(t('pos_helcim_probing'))),
+        ]),
+      ),
+    );
+    String report;
+    try {
+      report = (await widget.client.probeTerminalSupport()).report();
+    } on OdooException catch (e) {
+      report = 'PROBE FAILED: ${e.message}';
+    } finally {
+      if (mounted) Navigator.pop(context);
+    }
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(t('pos_helcim_probe_title')),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(child: SelectableText(report)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: report));
+                Navigator.pop(c);
+              },
+              child: Text(t('pos_copy'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(c),
+              child: Text(t('waste_cancel'))),
+        ],
+      ),
+    );
+  }
+
   /// Manager setup: Helcim device code + currency + API token (secure).
   Future<void> _helcimSetup() async {
     final store = HelcimStore.instance;
@@ -414,6 +461,15 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
                       hintText: store.hasToken
                           ? t('pos_helcim_token_set')
                           : t('pos_helcim_token_hint')),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.search),
+                  label: Text(t('pos_helcim_probe')),
+                  onPressed: () async {
+                    Navigator.pop(c, false);
+                    await _runProbe();
+                  },
                 ),
               ],
             ),

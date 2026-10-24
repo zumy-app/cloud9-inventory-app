@@ -337,4 +337,103 @@ void main() {
       expect(e.message, contains('amount_tax'));
     }
   });
+
+  test('integration: draft flag travels to create_from_ui', () async {
+    dynamic draftFlag;
+    final mock = MockClient((req) async {
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      final params = body['params'] as Map<String, dynamic>;
+      if ("${params['model']}/${params['method']}" ==
+          'pos.order/create_from_ui') {
+        draftFlag = (params['args'] as List)[1];
+        return http.Response(
+            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': [101]}), 200);
+      }
+      if ("${params['model']}/${params['method']}" == 'pos.order/read') {
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': [
+                {
+                  'id': 101,
+                  'pos_reference': 'Order 0001',
+                  'amount_total': 8.0,
+                  'state': 'draft'
+                }
+              ]
+            }),
+            200);
+      }
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+    });
+    final c = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    await c.posCheckout(
+      sessionId: 9,
+      lines: const [PosCartLine(productId: 10, qty: 1, priceUnit: 8.0)],
+      tenders: const [PosTender(methodId: 2, amount: 8.0)],
+      amountTax: 0,
+      draft: true,
+    );
+    expect(draftFlag, isTrue);
+  });
+
+  test('integration: probe lists helcim models + terminal methods', () async {
+    final mock = MockClient((req) async {
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      final params = body['params'] as Map<String, dynamic>;
+      final model = params['model'];
+      if (model == 'ir.model') {
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': [
+                {'name': 'Helcim Terminal', 'model': 'pos.helcim.terminal'}
+              ]
+            }),
+            200);
+      }
+      if (model == 'ir.model.fields') {
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': [
+                {'name': 'device_code', 'ttype': 'char', 'required': true},
+                {'name': 'amount', 'ttype': 'float', 'required': false}
+              ]
+            }),
+            200);
+      }
+      if (model == 'pos.payment.method') {
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': [
+                {
+                  'id': 4,
+                  'name': 'Helcim',
+                  'type': 'bank',
+                  'use_payment_terminal': 'helcim'
+                }
+              ]
+            }),
+            200);
+      }
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': []}), 200);
+    });
+    final c = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    final probe = await c.probeTerminalSupport();
+    expect(probe.models.length, 1);
+    expect(probe.models.first.model, 'pos.helcim.terminal');
+    expect(probe.models.first.fields, contains('device_code(char *req)'));
+    expect(probe.terminalMethods, contains('Helcim [helcim]'));
+    final report = probe.report();
+    expect(report, contains('pos.helcim.terminal'));
+    expect(report, contains('Helcim [helcim]'));
+  });
 }

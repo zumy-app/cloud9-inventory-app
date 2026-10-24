@@ -1156,6 +1156,7 @@ class OdooClient {
     required List<PosCartLine> lines,
     required List<PosTender> tenders,
     double? amountTax,
+    bool draft = false,
   }) async {
     if (lines.isEmpty) throw OdooException('Cart is empty.');
     final tendered = tenders.fold(0.0, (a, t) => a + t.amount);
@@ -1224,7 +1225,7 @@ class OdooClient {
       result = await callKw(
           'pos.order', 'create_from_ui', [
         [orderDict],
-        false,
+        draft,
       ]);
     } catch (e) {
       throw OdooException('Could not create the sale: ${_full(e)}');
@@ -1252,7 +1253,7 @@ class OdooClient {
         state = (m['state'] ?? '').toString();
       }
     } catch (_) {}
-    if (state.isNotEmpty && state != 'paid') {
+    if (!draft && state.isNotEmpty && state != 'paid') {
       try {
         await callKw('pos.order', 'action_pos_order_paid', [
           [orderId]
@@ -1273,6 +1274,75 @@ class OdooClient {
   String _posUnavailable(Object e) {
     final m = e.toString();
     return 'POS_UNAVAILABLE: $m';
+  }
+
+  /// Read-only probe: what on THIS Odoo can drive a payment terminal?
+  /// Lists models mentioning helcim/terminal/pos payment, their fields,
+  /// and terminal-configured payment methods. Nothing is created or
+  /// written. The report is copyable from the POS setup screen so the
+  /// exact server hook can be wired without guessing.
+  Future<TerminalProbe> probeTerminalSupport() async {
+    final models = <ProbeModel>[];
+    final notes = <String>[];
+    // 1. Custom/standard models mentioning helcim or terminal.
+    try {
+      final result =
+          await callKw('ir.model', 'search_read', [], kwargs: {
+        'domain': [
+          '|',
+          ['model', 'ilike', 'helcim'],
+          '|',
+          ['model', 'ilike', 'terminal'],
+          ['name', 'ilike', 'terminal'],
+        ],
+        'fields': ['name', 'model'],
+        'limit': 30,
+      });
+      for (final e in (result as List)) {
+        final m = (e as Map).cast<String, dynamic>();
+        final modelName = (m['model'] ?? '').toString();
+        if (modelName.isEmpty) continue;
+        var fields = <String>[];
+        try {
+          final fr = await callKw('ir.model.fields', 'search_read', [],
+              kwargs: {
+                'domain': [
+                  ['model', '=', modelName]
+                ],
+                'fields': ['name', 'ttype', 'required'],
+                'limit': 100,
+              });
+          fields = (fr as List).map((f) {
+            final fm = (f as Map).cast<String, dynamic>();
+            final req = fm['required'] == true ? ' *req' : '';
+            return '${fm['name']}(${(fm['ttype'] ?? '').toString()}$req)';
+          }).toList();
+        } catch (_) {
+          fields = ['<fields unreadable>'];
+        }
+        models.add(ProbeModel(
+            name: (m['name'] ?? '').toString(),
+            model: modelName,
+            fields: fields));
+      }
+    } catch (e) {
+      notes.add('ir.model unreadable: ${_short(e)}');
+    }
+    // 2. Payment methods with a terminal integration configured.
+    final terminals = <String>[];
+    try {
+      final methods = await posPaymentMethods();
+      for (final pm in methods) {
+        if (pm.isTerminal) terminals.add('${pm.name} [${pm.terminal}]');
+      }
+      if (terminals.isEmpty) {
+        notes.add(
+            'No payment method has a terminal integration (use_payment_terminal empty).');
+      }
+    } catch (e) {
+      notes.add('payment methods unreadable: ${_short(e)}');
+    }
+    return TerminalProbe(models: models, terminalMethods: terminals, notes: notes);
   }
 
   double _round2(double v) => (v * 100).round() / 100.0;
@@ -1311,6 +1381,47 @@ class OdooClient {
 
   /// Full server message (for the copyable error dialog — nothing hidden).
   String _full(Object e) => e is OdooException ? e.message : e.toString();
+}
+
+/// A model found by the terminal probe.
+class ProbeModel {
+  final String name;
+  final String model;
+  final List<String> fields;
+  const ProbeModel(
+      {required this.name, required this.model, this.fields = const []});
+}
+
+/// Read-only report of what on this Odoo can drive a payment terminal.
+class TerminalProbe {
+  final List<ProbeModel> models;
+  final List<String> terminalMethods;
+  final List<String> notes;
+  const TerminalProbe(
+      {this.models = const [],
+      this.terminalMethods = const [],
+      this.notes = const []});
+
+  /// Copyable plain-text report for the setup screen.
+  String report() {
+    final sb = StringBuffer('ODOO TERMINAL PROBE\n');
+    sb.writeln('payment methods with terminal: '
+        '${terminalMethods.isEmpty ? 'NONE' : terminalMethods.join(', ')}');
+    if (models.isEmpty) {
+      sb.writeln('models mentioning helcim/terminal: NONE');
+    } else {
+      for (final m in models) {
+        sb.writeln('model ${m.model} (${m.name})');
+        for (final f in m.fields) {
+          sb.writeln('  - $f');
+        }
+      }
+    }
+    for (final n in notes) {
+      sb.writeln('note: $n');
+    }
+    return sb.toString();
+  }
 }
 
 /// Employee linked to the logged-in Odoo user.

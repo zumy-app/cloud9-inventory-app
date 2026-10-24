@@ -33,7 +33,8 @@ Register → scan/search → cart → tender → paid receipt.
   This is the exact path web POS uses daily, so custom required fields
   (e.g. a required `amount_tax` on prod) are satisfied like prod. Single
   call, fresh uuid per attempt — a retry can never double-charge; an
-  unconfirmed response throws instead of guessing an order id.
+  unconfirmed response throws instead of guessing an order id. Optional
+  `draft: true` creates a backend draft for terminal-first flows.
 * Draft state after sync falls back to `action_pos_order_paid`; failures
   name the order id for register-side pay/void. Error dialogs show the
   FULL server text with a Copy button.
