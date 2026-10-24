@@ -1095,6 +1095,8 @@ class OdooClient {
   }
 
   /// Payment methods (cash, card...). Tolerates field differences.
+  /// `terminal` names the integrated terminal (e.g. helcim/stripe/adyen)
+  /// or '' when the method records payment directly.
   Future<List<PosPayMethod>> posPaymentMethods() async {
     dynamic result;
     try {
@@ -1104,7 +1106,13 @@ class OdooClient {
               'domain': [
                 ['active', '=', true]
               ],
-              'fields': ['id', 'name', 'is_cash_count', 'type'],
+              'fields': [
+                'id',
+                'name',
+                'is_cash_count',
+                'type',
+                'use_payment_terminal'
+              ],
               'order': 'name',
             });
       } catch (_) {
@@ -1122,10 +1130,16 @@ class OdooClient {
       final m = (e as Map).cast<String, dynamic>();
       final type = (m['type'] ?? '').toString();
       final cash = m['is_cash_count'] == true || type == 'cash';
+      final term = m['use_payment_terminal'];
+      final terminal =
+          (term == null || term is bool || term == 'none' || term == false)
+              ? ''
+              : term.toString();
       return PosPayMethod(
         id: (m['id'] as num).toInt(),
         name: (m['name'] ?? '').toString(),
         isCash: cash,
+        terminal: terminal,
       );
     }).toList();
   }
@@ -1145,7 +1159,9 @@ class OdooClient {
     try {
       orderId = await callKw('pos.order', 'create', [
         {
-          'pos_session_id': sessionId,
+          // NOTE: the field is session_id (not pos_session_id) — the
+          // latter throws "Invalid field" and aborts the whole sale.
+          'session_id': sessionId,
           'lines': [
             for (final l in lines)
               [
@@ -1388,8 +1404,16 @@ class PosPayMethod {
   final int id;
   final String name;
   final bool isCash;
+
+  /// Integrated terminal (e.g. 'helcim') or '' for direct methods.
+  final String terminal;
   const PosPayMethod(
-      {required this.id, required this.name, this.isCash = false});
+      {required this.id,
+      required this.name,
+      this.isCash = false,
+      this.terminal = ''});
+
+  bool get isTerminal => terminal.isNotEmpty;
 }
 
 /// Server receipt after a paid sale.

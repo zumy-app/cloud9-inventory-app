@@ -177,6 +177,15 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
 
   double get _tenderVal => double.tryParse(_tender.text.trim()) ?? 0;
 
+  PosPayMethod? get _selectedMethod {
+    final mid = _methodId;
+    if (mid == null) return null;
+    for (final m in _methods) {
+      if (m.id == mid) return m;
+    }
+    return null;
+  }
+
   Future<void> _charge() async {
     final s = _session;
     if (s == null) {
@@ -198,22 +207,30 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
       setState(() => _err = t('pos_err_short'));
       return;
     }
+    final terminal = _selectedMethod?.terminal ?? '';
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         title: Text(t('pos_confirm_title')),
-        content: Text(Lang.instance.f('pos_confirm_body', {
-          'total': total.toStringAsFixed(2),
-          'tendered': tendered.toStringAsFixed(2),
-          'change': (tendered - total).toStringAsFixed(2),
-        })),
+        content: Text(terminal.isEmpty
+            ? Lang.instance.f('pos_confirm_body', {
+                'total': total.toStringAsFixed(2),
+                'tendered': tendered.toStringAsFixed(2),
+                'change': (tendered - total).toStringAsFixed(2),
+              })
+            : Lang.instance.f('pos_confirm_terminal', {
+                'terminal': terminal,
+                'total': total.toStringAsFixed(2),
+              })),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(c, false),
               child: Text(t('waste_cancel'))),
           FilledButton(
               onPressed: () => Navigator.pop(c, true),
-              child: Text(t('pos_charge_go'))),
+              child: Text(terminal.isEmpty
+                  ? t('pos_charge_go')
+                  : t('pos_charge_terminal_go'))),
         ],
       ),
     );
@@ -496,6 +513,20 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
                 .toList(),
           ),
           const SizedBox(height: 8),
+          if ((_selectedMethod?.isTerminal ?? false))
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(Lang.instance.f('pos_terminal_warn', {
+                'terminal': _selectedMethod?.terminal ?? '',
+              })),
+            ),
+          if ((_selectedMethod?.isTerminal ?? false))
+            const SizedBox(height: 8),
           Row(
             children: [
               Expanded(

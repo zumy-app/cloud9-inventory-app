@@ -151,12 +151,14 @@ void main() {
   test('integration: checkout creates order, payment, pays, reads receipt',
       () async {
     final calls = <String>[];
+    String createBody = '';
     final mock = MockClient((req) async {
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       final params = body['params'] as Map<String, dynamic>;
       final key = "${params['model']}/${params['method']}";
       calls.add(key);
       if (key == 'pos.order/create') {
+        createBody = req.body;
         return http.Response(
             jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': 101}), 200);
       }
@@ -193,9 +195,39 @@ void main() {
     expect(calls, contains('pos.order/create'));
     expect(calls, contains('pos.payment/create'));
     expect(calls, contains('pos.order/action_pos_order_paid'));
+    // Regression (Pixel 2026-10-24): pos.order has NO pos_session_id field.
+    expect(createBody, contains('"session_id":9'));
+    expect(createBody, isNot(contains('pos_session_id')));
     expect(r.reference, 'Order 0001');
     expect(r.total, 8.0);
     expect(r.change, closeTo(2.0, 0.001));
+  });
+
+  test('integration: terminal methods flagged (e.g. helcim)', () async {
+    final mock = MockClient((req) async {
+      return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': [
+              {'id': 2, 'name': 'Cash', 'type': 'cash'},
+              {
+                'id': 4,
+                'name': 'Helcim',
+                'type': 'bank',
+                'use_payment_terminal': 'helcim'
+              }
+            ]
+          }),
+          200);
+    });
+    final c = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    final methods = await c.posPaymentMethods();
+    final cash = methods.firstWhere((m) => m.id == 2);
+    final helcim = methods.firstWhere((m) => m.id == 4);
+    expect(cash.isTerminal, isFalse);
+    expect(helcim.isTerminal, isTrue);
+    expect(helcim.terminal, 'helcim');
   });
 
   test('integration: payment failure keeps draft message, not silent',
