@@ -831,3 +831,52 @@ class ScrapResult {
   final double unitValue;
   const ScrapResult({required this.scrapId, required this.unitValue});
 }
+
+/// Read-only server scrap line for the history/report view.
+class ScrapHistoryLine {
+  final int id;
+  final String productName;
+  final double qty;
+  final String dateDone;
+  final String state;
+  final String origin;
+  const ScrapHistoryLine({
+    required this.id,
+    required this.productName,
+    required this.qty,
+    required this.dateDone,
+    required this.state,
+    required this.origin,
+  });
+}
+
+extension ScrapHistory on OdooClient {
+  /// Recent scraps across all products/devices (server truth).
+  /// Used to back the Waste history when the local log is empty
+  /// (reinstall, second device) or to cross-check it.
+  Future<List<ScrapHistoryLine>> fetchScrapHistory({int limit = 100}) async {
+    final result = await callKw('stock.scrap', 'search_read', [], kwargs: {
+      'domain': [],
+      'fields': ['id', 'product_id', 'scrap_qty', 'state', 'date_done', 'origin'],
+      'limit': limit,
+      'order': 'id desc',
+    });
+    return (result as List).map((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      final prod = m['product_id'];
+      final name = prod is List && prod.length > 1
+          ? prod[1].toString()
+          : prod.toString();
+      final q = m['scrap_qty'];
+      final dd = m['date_done'];
+      return ScrapHistoryLine(
+        id: (m['id'] as num).toInt(),
+        productName: name,
+        qty: q is num ? q.toDouble() : 0,
+        dateDone: (dd == null || dd is bool) ? '' : dd.toString(),
+        state: (m['state'] ?? '').toString(),
+        origin: (m['origin'] ?? '').toString(),
+      );
+    }).toList();
+  }
+}

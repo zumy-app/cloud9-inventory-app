@@ -2,9 +2,16 @@
 // Append-only: corrections are reversing entries, originals never mutate.
 // Disposition date (disposedAt, server-validated) is the tax date;
 // packageExpiry is supporting detail only.
+//
+// Persistence: lines + locks survive restarts via SharedPreferences so the
+// history/report view is not wiped by reinstalls/updates. Server scraps
+// remain the cross-check (see OdooClient.fetchScrapHistory).
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Loss reason (what happened to the product).
 enum WasteReason { expired, damaged, spoiled, recall }
@@ -156,6 +163,68 @@ class WasteLine {
       voidChain ?? '',
     ].join(',');
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'variantId': variantId,
+        'tmplId': tmplId,
+        'name': name,
+        'barcode': barcode,
+        'sku': sku,
+        'qty': qty,
+        'reason': reason.index,
+        'disposition': disposition.index,
+        'packageExpiry': packageExpiry,
+        'note': note,
+        'supplierInvoice': supplierInvoice,
+        'unitValue': unitValue,
+        'retailEach': retailEach,
+        'scrapId': scrapId,
+        'status': status.index,
+        'discoveredAt': discoveredAt.toIso8601String(),
+        'disposedAt': disposedAt?.toIso8601String(),
+        'staff': staff,
+        'validatedBy': validatedBy,
+        'quarantined': quarantined,
+        'voidChain': voidChain,
+      };
+
+  factory WasteLine.fromJson(Map<String, dynamic> j) => WasteLine(
+        id: (j['id'] ?? '').toString(),
+        variantId: (j['variantId'] as num?)?.toInt() ?? 0,
+        tmplId: (j['tmplId'] as num?)?.toInt() ?? 0,
+        name: (j['name'] ?? '').toString(),
+        barcode: (j['barcode'] ?? '').toString(),
+        sku: (j['sku'] ?? '').toString(),
+        qty: (j['qty'] as num?)?.toDouble() ?? 0,
+        reason: WasteReason.values[
+            ((j['reason'] as num?)?.toInt() ?? 0) % WasteReason.values.length],
+        disposition: WasteDisposition.values[((j['disposition'] as num?)
+                ?.toInt() ??
+            0) % WasteDisposition.values.length],
+        packageExpiry: (j['packageExpiry'] ?? '').toString(),
+        note: (j['note'] ?? '').toString(),
+        supplierInvoice: (j['supplierInvoice'] ?? '').toString(),
+        unitValue: (j['unitValue'] as num?)?.toDouble() ?? 0,
+        retailEach: (j['retailEach'] as num?)?.toDouble() ?? 0,
+        scrapId: (j['scrapId'] as num?)?.toInt(),
+        status: WasteStatus.values[
+            ((j['status'] as num?)?.toInt() ?? 0) % WasteStatus.values.length],
+        discoveredAt: DateTime.tryParse((j['discoveredAt'] ?? '').toString()) ??
+            DateTime.now().toUtc(),
+        disposedAt: j['disposedAt'] == null
+            ? null
+            : DateTime.tryParse(j['disposedAt'].toString()),
+        staff: (j['staff'] ?? '').toString(),
+        validatedBy: (j['validatedBy'] ?? '').toString(),
+        quarantined: j['quarantined'] == true,
+        voidChain: j['voidChain']?.toString(),
+      );
+
+  /// Live loss math used by the form: qty × effective unit cost.
+  /// Whitebox-tested; the form must call this (not a stale snapshot).
+  static double liveTotal(double qty, double effectiveUnitCost) =>
+      qty * effectiveUnitCost;
 }
 
 class WasteStore extends ChangeNotifier {
@@ -175,6 +244,7 @@ class WasteStore extends ChangeNotifier {
   void add(WasteLine line) {
     _lines.insert(0, line);
     notifyListeners();
+    persist();
   }
 
   void markPosted(String id, {required int scrapId, required double unitValue, DateTime? disposedAt}) {
@@ -188,6 +258,7 @@ class WasteStore extends ChangeNotifier {
       disposedAt: disposedAt ?? DateTime.now().toUtc(),
     );
     notifyListeners();
+    persist();
   }
 
   /// Manager validation. Blocked for locked months and self-approval.
@@ -202,6 +273,7 @@ class WasteStore extends ChangeNotifier {
     if (l.status != WasteStatus.posted) return false;
     _lines[i] = l.copyWith(status: WasteStatus.validated, validatedBy: manager);
     notifyListeners();
+    persist();
     return true;
   }
 
@@ -237,12 +309,14 @@ class WasteStore extends ChangeNotifier {
     _lines[i] = l.copyWith(status: WasteStatus.voided, voidChain: reversal.id);
     _lines.insert(0, reversal);
     notifyListeners();
+    persist();
     return true;
   }
 
   void lockMonth(DateTime d) {
     _lockedMonths.add(monthKey(d));
     notifyListeners();
+    persist();
   }
 
   double get netDeductible =>
@@ -301,6 +375,41 @@ class WasteStore extends ChangeNotifier {
     _lines.clear();
     _lockedMonths.clear();
     notifyListeners();
+    persist();
+  }
+
+  static const _kLines = 'waste_lines_v1';
+  static const _kLocks = 'waste_locks_v1';
+
+  /// Best-effort persistence; never throws (history must not block logging).
+  Future<void> persist() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = jsonEncode(_lines.map((l) => l.toJson()).toList());
+      await p.setString(_kLines, raw);
+      await p.setStringList(_kLocks, _lockedMonths.toList());
+    } catch (_) {}
+  }
+
+  /// Load persisted lines/locks (call once from the Waste screen init).
+  Future<void> load() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kLines);
+      if (raw != null && raw.isNotEmpty) {
+        final list = (jsonDecode(raw) as List)
+            .map((e) => WasteLine.fromJson((e as Map).cast<String, dynamic>()))
+            .toList();
+        _lines
+          ..clear()
+          ..addAll(list);
+      }
+      final locks = p.getStringList(_kLocks) ?? const [];
+      _lockedMonths
+        ..clear()
+        ..addAll(locks);
+      notifyListeners();
+    } catch (_) {}
   }
 
   @visibleForTesting

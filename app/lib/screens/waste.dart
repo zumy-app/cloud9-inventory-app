@@ -12,7 +12,6 @@ import '../i18n/lang.dart';
 import '../odoo_client.dart';
 import '../waste_store.dart';
 import '../widgets/feedback.dart';
-import 'receive.dart';
 import 'scan.dart';
 
 class WasteScreen extends StatefulWidget {
@@ -33,6 +32,7 @@ class _WasteScreenState extends State<WasteScreen> {
   final _cost = TextEditingController();
   final _price = TextEditingController();
   final _historySearch = TextEditingController();
+  final _countFix = TextEditingController();
 
   bool _busy = false;
   String? _err;
@@ -44,14 +44,19 @@ class _WasteScreenState extends State<WasteScreen> {
   String _expiry = ''; // '' = none chosen yet; 'NO-DATE' = illegible
   bool _showHistory = false;
   bool _fixingPrice = false;
+  bool _fixingCount = false;
   String? _overReason; // preset override chip, combined with _note
   String _historyFilter = 'all'; // all | pending | validated | voided | draft
   String? _lastResult; // success banner after a scrap posts
+  List<ScrapHistoryLine> _serverHistory = [];
+  bool _serverLoading = false;
 
   @override
   void initState() {
     super.initState();
     WasteStore.instance.addListener(_refresh);
+    WasteStore.instance.load();
+    _loadServerHistory();
   }
 
   @override
@@ -65,7 +70,20 @@ class _WasteScreenState extends State<WasteScreen> {
     _cost.dispose();
     _price.dispose();
     _historySearch.dispose();
+    _countFix.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadServerHistory() async {
+    setState(() => _serverLoading = true);
+    try {
+      final rows = await widget.client.fetchScrapHistory(limit: 100);
+      if (mounted) setState(() => _serverHistory = rows);
+    } catch (_) {
+      // Server history is a cross-check; local log remains authoritative.
+    } finally {
+      if (mounted) setState(() => _serverLoading = false);
+    }
   }
 
   void _refresh() {
@@ -147,11 +165,20 @@ class _WasteScreenState extends State<WasteScreen> {
     return '$over — $free';
   }
 
+  double get _effCost {
+    final p = _found;
+    final typed = double.tryParse(_cost.text.trim());
+    if (typed != null && typed > 0) return typed;
+    return p?.standardPrice ?? 0;
+  }
+
+  double get _effTotal => WasteLine.liveTotal(_qtyVal, _effCost);
+
   Future<void> _fixZeroPrice(InventoryProduct p) async {
     final cost = double.tryParse(_cost.text.trim());
     final price = double.tryParse(_price.text.trim());
-    if (cost == null || cost < 0 || price == null || price < 0) {
-      setState(() => _err = t('waste_err_nums'));
+    if (cost == null || cost <= 0 || price == null || price < 0) {
+      setState(() => _err = t('waste_err_nums_pos'));
       return;
     }
     setState(() {
@@ -160,8 +187,33 @@ class _WasteScreenState extends State<WasteScreen> {
     });
     try {
       await widget.client.updatePrices(p, price, cost);
-      await _lookup();
+      // Verify the write landed: re-read and compare. Odoo can accept the
+      // RPC yet still show stale values (rights, validation, read lag), and
+      // the old code toasted success regardless. Never claim a save we
+      // cannot prove.
+      final fresh = await widget.client.lookupProduct(
+          p.barcode.isNotEmpty ? p.barcode : p.defaultCode);
       if (!mounted) return;
+      final fp = fresh?.product;
+      if (fp == null) {
+        setState(() => _err = t('waste_err_verify'));
+        return;
+      }
+      const tol = 0.0001;
+      if ((fp.standardPrice - cost).abs() > tol ||
+          (fp.listPrice - price).abs() > tol) {
+        setState(() {
+          _found = fp;
+          _err = t('waste_err_verify');
+        });
+        return;
+      }
+      setState(() {
+        _found = fp;
+        _cost.text = fp.standardPrice.toStringAsFixed(2);
+        _price.text = fp.listPrice.toStringAsFixed(2);
+        _fixingPrice = false;
+      });
       showOk(context, t('waste_price_fixed'));
     } on OdooException catch (e) {
       if (!mounted) return;
@@ -173,19 +225,80 @@ class _WasteScreenState extends State<WasteScreen> {
     }
   }
 
-  Future<void> _fixCountFirst(InventoryProduct p) async {
-    // Over-scrap usually means the shelf was never counted right.
-    // Jump to Count = mode with the barcode prefilled; on return,
-    // re-lookup so the fresh on-hand shows here.
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ReceiveScreen(
-        client: widget.client,
-        user: widget.user,
-        initialBarcode: _barcode.text.trim(),
-        initialMode: 'count',
+  /// In-place on-hand correction: no navigation away from the waste form.
+  /// Writes the absolute count via setStock, then verifies by re-reading.
+  Future<void> _fixCountInPlace(InventoryProduct p) async {
+    final target = double.tryParse(_countFix.text.trim());
+    if (target == null || target < 0) {
+      setState(() => _err = t('waste_err_nums'));
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(t('waste_count_title')),
+        content: Text(Lang.instance.f('waste_count_body', {
+          'name': p.name,
+          'before': p.qtyAvailable.toStringAsFixed(0),
+          'after': target.toStringAsFixed(0),
+        })),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: Text(t('waste_cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: Text(t('waste_count_go'))),
+        ],
       ),
-    ));
-    if (mounted) await _lookup();
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _err = null;
+    });
+    try {
+      await widget.client.setStock(p, target);
+      final code = p.barcode.isNotEmpty ? p.barcode : p.defaultCode;
+      final fresh = await widget.client.lookupProduct(code);
+      if (!mounted) return;
+      final fp = fresh?.product;
+      if (fp == null) {
+        setState(() => _err = t('waste_err_verify'));
+        return;
+      }
+      if ((fp.qtyAvailable - target).abs() > 0.001) {
+        setState(() {
+          _found = fp;
+          _err = t('waste_err_verify');
+        });
+        return;
+      }
+      setState(() {
+        _found = fp;
+        _fixingCount = false;
+        _overReason = null;
+      });
+      AuditLog.instance.add(AuditEntry(
+        when: DateTime.now(),
+        who: widget.user,
+        mode: 'count',
+        productId: p.variantId,
+        productName: p.name,
+        field: 'count-fix (waste)',
+        oldValue: p.qtyAvailable.toStringAsFixed(0),
+        newValue: target.toStringAsFixed(0),
+        reason: _combinedNote.isEmpty ? 'waste over-scrap fix' : _combinedNote,
+      ));
+      showOk(context, t('waste_count_fixed'));
+    } on OdooException catch (e) {
+      if (!mounted) return;
+      setState(() => _err = e.message == 'SESSION_EXPIRED'
+          ? t('waste_err_session')
+          : OdooException.friendly(e.message));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _resetForm() {
@@ -197,6 +310,7 @@ class _WasteScreenState extends State<WasteScreen> {
       _supplier.clear();
       _cost.clear();
       _price.clear();
+      _countFix.clear();
       _reason = null;
       _disposition = null;
       _expiry = '';
@@ -204,6 +318,7 @@ class _WasteScreenState extends State<WasteScreen> {
       _lots = [];
       _overReason = null;
       _fixingPrice = false;
+      _fixingCount = false;
       _err = null;
     });
   }
@@ -241,10 +356,9 @@ class _WasteScreenState extends State<WasteScreen> {
       setState(() => _err = t('waste_err_expiry'));
       return;
     }
-    // Zero cost/price is almost always a data mistake — fix first so the
+    // Zero cost is almost always a data mistake — fix first so the
     // frozen scrap value is defensible.
-    final effCost = double.tryParse(_cost.text.trim()) ?? p.standardPrice;
-    if (p.standardPrice <= 0 && effCost <= 0) {
+    if (p.standardPrice <= 0 && _effCost <= 0) {
       setState(() {
         _fixingPrice = true;
         _err = t('waste_err_zero_price');
@@ -284,6 +398,8 @@ class _WasteScreenState extends State<WasteScreen> {
       _err = null;
     });
     final id = 'w-${DateTime.now().toUtc().microsecondsSinceEpoch}';
+    final effPrice =
+        double.tryParse(_price.text.trim()) ?? p.listPrice;
     final line = WasteLine(
       id: id,
       variantId: p.variantId,
@@ -297,8 +413,8 @@ class _WasteScreenState extends State<WasteScreen> {
       packageExpiry: _expiry == 'NO-DATE' ? '' : _expiry,
       note: _combinedNote,
       supplierInvoice: _supplier.text.trim(),
-      unitValue: p.standardPrice, // estimate until scrap read-back freezes it
-      retailEach: p.listPrice,
+      unitValue: _effCost, // estimate until scrap read-back freezes it
+      retailEach: effPrice,
       status: WasteStatus.draft,
       discoveredAt: DateTime.now().toUtc(),
       staff: widget.user,
@@ -538,13 +654,24 @@ class _WasteScreenState extends State<WasteScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton(
-                            onPressed: _busy ? null : () => _fixCountFirst(p),
-                            child: Text(t('waste_fix_count')),
+                          child: TextField(
+                            controller: _countFix,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(
+                                labelText: t('waste_correct_onhand')),
+                            onChanged: (_) => setState(() {}),
                           ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.tonal(
+                          onPressed: _busy ? null : () => _fixCountInPlace(p),
+                          child: Text(t('waste_fix_count')),
                         ),
                       ],
                     ),
+                    if (_fixingCount)
+                      Text(t('waste_count_hint'),
+                          style: const TextStyle(color: Colors.grey)),
                   ],
                 ),
               ),
@@ -648,7 +775,7 @@ class _WasteScreenState extends State<WasteScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-              '${t('waste_total')} ${(_qtyVal * p.standardPrice).toStringAsFixed(2)}',
+              '${t('waste_total')} ${_effTotal.toStringAsFixed(2)}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           SizedBox(
@@ -763,6 +890,31 @@ class _WasteScreenState extends State<WasteScreen> {
                       onPressed: _shareCsv, child: Text(t('waste_export'))),
                 ],
               ),
+              Card(
+                color: const Color(0xFFF3F4F6),
+                child: ListTile(
+                  title: Text(t('waste_server_title')),
+                  subtitle: Text(_serverLoading
+                      ? t('waste_server_loading')
+                      : Lang.instance.f('waste_server_body', {
+                          'n': '${_serverHistory.length}'
+                        })),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: _loadServerHistory,
+                  ),
+                ),
+              ),
+              for (final s in _serverHistory.take(5))
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.cloud_done_outlined),
+                    title:
+                        Text('${s.productName} × ${s.qty.toStringAsFixed(0)}'),
+                    subtitle: Text(
+                        'scrap ${s.id} • ${s.state} • ${s.dateDone}\n${s.origin}'),
+                  ),
+                ),
             ],
           ),
         ),
