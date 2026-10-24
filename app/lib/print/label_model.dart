@@ -77,6 +77,39 @@ class LabelModel {
   final String promoEnds;
   final String saveText;
 
+  /// Type 01 shelf-tag payload (wireframes type01-mockup.html, zones A/B/D).
+  /// All default to "absent" so every existing call site and every
+  /// persisted line renders exactly as before until values are set.
+  /// See docs/06-TYPE01-LABEL-REDESIGN.md for sources and fallbacks.
+
+  /// Aisle/shelf location ('AISLE 04-B2 • DELI FRESH').
+  /// '' falls back to [category] at render, then hides.
+  final String shelfLoc;
+
+  /// Verification-date override ('10/24'). '' auto-stamps current MM/YY
+  /// at render via [Tspl.verifyText] — the chip always shows.
+  final String verifyDate;
+
+  /// Header slot codes, lines split on '\n' ('MK-203D\nST-084', max 2).
+  /// '' hides the block.
+  final String slot;
+
+  /// Department code ('04' -> 'DEPT 04'). '' hides the badge row value.
+  final String dept;
+
+  /// Allergen callout ('CONTAINS GLUTEN/DAIRY'). '' omits it from the
+  /// subtitle row.
+  final String allergens;
+
+  /// Show the TAXABLE chip. Default false: never claim tax status
+  /// we don't know.
+  final bool taxable;
+
+  /// Unit word under the hero cents ('EACH'). Default '' = hidden:
+  /// a weighed ($/LB) item stamped EACH is wrong data, so this is
+  /// opt-in per store/line.
+  final String eachText;
+
   /// Kitchen payload (Type 04). Null unless [kind] is kitchen.
   final PrepInfo? prep;
 
@@ -93,6 +126,13 @@ class LabelModel {
     this.promoEnds = '',
     this.saveText = '',
     this.prep,
+    this.shelfLoc = '',
+    this.verifyDate = '',
+    this.slot = '',
+    this.dept = '',
+    this.allergens = '',
+    this.taxable = false,
+    this.eachText = '',
   });
 
   /// Full name line as printed: "name, size" when a size is present.
@@ -169,6 +209,13 @@ class LabelModel {
     String? promoEnds,
     String? saveText,
     PrepInfo? prep,
+    String? shelfLoc,
+    String? verifyDate,
+    String? slot,
+    String? dept,
+    String? allergens,
+    bool? taxable,
+    String? eachText,
   }) {
     return LabelModel(
       name: name ?? this.name,
@@ -183,6 +230,13 @@ class LabelModel {
       promoEnds: promoEnds ?? this.promoEnds,
       saveText: saveText ?? this.saveText,
       prep: prep ?? this.prep,
+      shelfLoc: shelfLoc ?? this.shelfLoc,
+      verifyDate: verifyDate ?? this.verifyDate,
+      slot: slot ?? this.slot,
+      dept: dept ?? this.dept,
+      allergens: allergens ?? this.allergens,
+      taxable: taxable ?? this.taxable,
+      eachText: eachText ?? this.eachText,
     );
   }
 

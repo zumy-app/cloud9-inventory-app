@@ -42,6 +42,13 @@ class LabelPreview extends StatelessWidget {
 }
 
 /// Type 01 standard retail (mirrors Tspl._composeStandard zone for zone).
+/// Wireframe: labels-wireframes/type01-mockup.html (406x203 canvas).
+/// Titles are two-tier (Tspl.titleFit: full size to 30 chars, smaller cut
+/// to 44) so the line only ellipsizes when nothing fits — preview and
+/// print share the tiers and never disagree on content.
+/// Compact (list thumbnails) keeps zone parity but hides detail rows
+/// (slot, store code, subtitle, unit cell, EACH, GS1 band) that cannot
+/// fit below ~100px tall; the 140px job-row box grows to 180px.
 class _StandardPreview extends StatelessWidget {
   final LabelModel model;
   final bool compact;
@@ -50,102 +57,205 @@ class _StandardPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final norm = Tspl.normalizeCode(model.code);
-    final title = Tspl.titleLines(model.displayName).join('\n');
+    // Two-tier title (Tspl.titleFit): full size to 30 chars, a smaller
+    // cut to 44 — the line only ellipsizes when nothing fits.
+    final spec = Tspl.titleFit(model.displayName);
+    final title = spec.lines.join('\n');
     final parts = Tspl.splitPrice(model.price);
     final unit = Tspl.unitPriceText(model.price, model.size);
+    final shelf = Tspl.shelfLine(model.shelfLoc, model.category);
+    final slots = Tspl.slotLines(model.slot);
+    final code = Tspl.storeCode(model.category);
+    final verify = Tspl.verifyText(model.verifyDate);
     final subBits = [
       if (model.size.trim().isNotEmpty) model.size.trim().toUpperCase(),
-      if (model.category.trim().isNotEmpty)
-        model.category.trim().toUpperCase(),
+      if (model.allergens.trim().isNotEmpty)
+        model.allergens.trim().toUpperCase(),
     ];
+    final showSub = !compact && (subBits.isNotEmpty || model.taxable);
+    final dept = model.dept.trim().isNotEmpty
+        ? 'DEPT ${model.dept.trim().toUpperCase()}'
+        : '';
+    // Detail rows that only fit at full scale.
+    final fullOnly = !compact;
+
+    final double pad = compact ? 5 : 10;
     final double micro = compact ? 7 : 9;
+    final double titleSize = spec.font == '2'
+        ? (compact ? 12 : 18)
+        : (compact ? 9 : 13);
+    final double heroInt = compact ? 22 : 64;
+    final double heroSmall = compact ? 10 : 26;
+    final double logoH = compact ? 22 : 44;
     return AspectRatio(
       aspectRatio: 2 / 1,
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          border: Border.all(color: Colors.grey.shade400),
-          borderRadius: BorderRadius.circular(compact ? 4 : 8),
+          border: Border.all(color: Colors.black, width: 2),
         ),
-        padding: EdgeInsets.all(compact ? 6 : 10),
+        padding: EdgeInsets.all(pad),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header: enlarged oval left, metadata micro right.
+            // A. Header: logo + slot codes | shelf + VERIF knockout + code.
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Image.asset(
-                  'assets/logo.png',
-                  height: compact ? 16 : 28,
+                  'assets/cloud_9_kitchen_market_logo.png',
+                  height: logoH,
                   fit: BoxFit.contain,
                   errorBuilder: (ctx, err, stack) => Text(
                     'CLOUD 9 MARKET',
                     style: TextStyle(
                       fontFamily: _titleFace,
-                      fontSize: compact ? 8 : 10,
+                      fontSize: micro,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5,
                     ),
                   ),
                 ),
+                if (slots.isNotEmpty && fullOnly) ...[
+                  const SizedBox(width: 6),
+                  Container(width: 1, height: 22, color: Colors.black),
+                  const SizedBox(width: 6),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (var i = 0; i < slots.length; i++)
+                        Text(
+                          slots[i],
+                          style: TextStyle(
+                              fontFamily: _monoFace,
+                              fontSize: i == 0 ? 8 : 7,
+                              fontWeight: FontWeight.bold),
+                        ),
+                    ],
+                  ),
+                ],
                 const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (model.category.trim().isNotEmpty)
-                      Text(
-                        model.category.trim().toUpperCase(),
-                        style: TextStyle(
-                            fontFamily: _monoFace, fontSize: micro),
+                if (shelf.isNotEmpty || fullOnly)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (shelf.isNotEmpty)
+                        Text(
+                          shelf,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontFamily: _monoFace,
+                              fontSize: micro,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            color: Colors.black,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1),
+                            child: Text(
+                              verify,
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontFamily: _monoFace,
+                                  fontSize: micro - 1,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          if (code.isNotEmpty && fullOnly) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              code,
+                              style: TextStyle(
+                                  fontFamily: _monoFace,
+                                  fontSize: micro - 1,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ],
                       ),
-                    if (model.defaultCode.trim().isNotEmpty)
-                      Text(
-                        'SKU: ${model.defaultCode.trim().toUpperCase()}',
-                        style: TextStyle(
-                            fontFamily: _monoFace, fontSize: micro),
-                      ),
-                  ],
-                ),
+                    ],
+                  ),
               ],
             ),
-            Divider(height: compact ? 6 : 10, thickness: 1),
-            // Title block: full-width uppercase, never truncated mid-word.
+            Divider(height: compact ? 6 : 10, thickness: 2, color: Colors.black),
+            // B. Title block: single uppercase line + subtitle/TAXABLE row.
             Text(
               title,
-              maxLines: 2,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontFamily: _titleFace,
-                fontSize: compact ? 11 : 15,
-                fontWeight: FontWeight.w700,
+                fontSize: titleSize,
+                fontWeight: FontWeight.w900,
               ),
             ),
-            if (subBits.isNotEmpty)
-              Text(
-                subBits.join(' • '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontFamily: _monoFace,
-                    fontSize: micro,
-                    color: Colors.grey.shade800),
+            if (showSub)
+              Row(
+                children: [
+                  if (subBits.isNotEmpty)
+                    Expanded(
+                      child: Text(
+                        subBits.join(' • '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontFamily: _titleFace,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  if (model.taxable)
+                    Container(
+                      margin: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 0),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        border: Border.all(color: Colors.black),
+                      ),
+                      child: Text(
+                        'TAXABLE',
+                        style: TextStyle(
+                            fontFamily: _monoFace,
+                            fontSize: micro - 2,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                ],
               ),
-            Divider(height: compact ? 6 : 10, thickness: 1),
-            // Lower split: barcode bay | price hero.
+            Divider(height: compact ? 5 : 8, thickness: 1, color: Colors.black),
+            // C+D. Lower split: barcode bay | price hero.
             Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
+                    flex: 48,
                     child: norm.digits.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'NO BARCODE',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1),
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'ADD BARCODE',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1),
+                                ),
+                                if (model.defaultCode.trim().isNotEmpty)
+                                  Text(
+                                    'SKU: ${model.defaultCode.trim().toUpperCase()}',
+                                    style: TextStyle(
+                                        fontFamily: _monoFace,
+                                        fontSize: micro,
+                                        color: Colors.grey.shade800),
+                                  ),
+                              ],
                             ),
                           )
                         : Column(
@@ -171,84 +281,176 @@ class _StandardPreview extends StatelessWidget {
                               Text(
                                 norm.digits,
                                 textAlign: TextAlign.center,
+                                maxLines: 1,
                                 style: TextStyle(
                                     fontFamily: _monoFace,
                                     fontSize: micro,
                                     letterSpacing: 2),
                               ),
-                              if (unit != null)
+                              if (unit != null && fullOnly)
                                 Container(
                                   margin:
                                       const EdgeInsets.only(top: 2),
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 4, vertical: 1),
-                                  decoration: BoxDecoration(
-                                      border: Border.all(width: 1)),
-                                  child: Text(
-                                    'UNIT PRICE  $unit',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                        fontFamily: _monoFace,
-                                        fontSize: micro,
-                                        fontWeight: FontWeight.bold),
+                                  color: Colors.black,
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'UNIT PRICE:',
+                                        style: TextStyle(
+                                            color: Colors.white,
+                                            fontFamily: _monoFace,
+                                            fontSize: micro - 2,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                      Text(
+                                        unit,
+                                        style: TextStyle(
+                                            color: Colors.white,
+                                            fontFamily: _monoFace,
+                                            fontSize: micro,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
                                   ),
                                 ),
                             ],
                           ),
                   ),
-                  const VerticalDivider(width: 12, thickness: 1),
+                  VerticalDivider(
+                      width: compact ? 8 : 12,
+                      thickness: 2,
+                      color: Colors.black),
                   Expanded(
+                    flex: 52,
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // Three-part hero lockup: $ + huge int + raised cents.
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment:
-                              CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
-                            Text(
-                              '\$',
-                              style: TextStyle(
-                                fontFamily: _titleFace,
-                                fontSize: compact ? 12 : 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            Text(
-                              parts.intPart,
-                              style: TextStyle(
-                                fontFamily: _titleFace,
-                                fontSize: compact ? 30 : 44,
-                                fontWeight: FontWeight.w800,
-                                height: 1.0,
-                              ),
-                            ),
-                            Text(
-                              parts.cents,
-                              style: TextStyle(
-                                fontFamily: _titleFace,
-                                fontSize: compact ? 12 : 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 1),
-                          decoration: BoxDecoration(
-                              border: Border.all(width: 1)),
-                          child: Text(
-                            'RETAIL',
-                            style: TextStyle(
-                                fontFamily: _monoFace,
-                                fontSize: micro,
-                                fontWeight: FontWeight.bold),
+                          padding: const EdgeInsets.only(bottom: 2),
+                          decoration: const BoxDecoration(
+                            border: Border(
+                                bottom: BorderSide(
+                                    color: Colors.black, width: 1)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children: [
+                              // Scale-down guard: the badge must never push
+                              // past narrow thumbnail columns.
+                              Flexible(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Container(
+                                    color: Colors.black,
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: compact ? 4 : 6,
+                                        vertical: 1),
+                                    child: Text(
+                                      'EVERYDAY RETAIL',
+                                      maxLines: 1,
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontFamily: _titleFace,
+                                          fontSize:
+                                              compact ? micro - 1 : micro,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing:
+                                              compact ? 0 : 1),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (dept.isNotEmpty && fullOnly)
+                                Text(
+                                  dept,
+                                  style: TextStyle(
+                                      fontFamily: _monoFace,
+                                      fontSize: micro - 1,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                            ],
                           ),
                         ),
+                        Expanded(
+                          // Scale-down guard: any price (e.g. 3-digit)
+                          // fits narrow thumbnail columns.
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.center,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '\$',
+                                  style: TextStyle(
+                                    fontFamily: _titleFace,
+                                    fontSize: heroSmall,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                Text(
+                                  parts.intPart,
+                                  style: TextStyle(
+                                    fontFamily: _titleFace,
+                                    fontSize: heroInt,
+                                    fontWeight: FontWeight.w900,
+                                    height: 1.0,
+                                  ),
+                                ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      parts.cents,
+                                      style: TextStyle(
+                                        fontFamily: _titleFace,
+                                        fontSize: heroSmall,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    if (model.eachText
+                                            .trim()
+                                            .isNotEmpty &&
+                                        fullOnly)
+                                      Text(
+                                        model.eachText.trim().toUpperCase(),
+                                        style: TextStyle(
+                                            fontFamily: _monoFace,
+                                            fontSize: micro - 2,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (fullOnly)
+                          Container(
+                            color: Colors.black,
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 1),
+                            child: Text(
+                              'GS1 COMPLIANT SHELF EDGE',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontFamily: _monoFace,
+                                  fontSize: micro - 2,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -317,7 +519,7 @@ class _RapidPreview extends StatelessWidget {
                     ),
                   ),
                   Image.asset(
-                    'assets/logo.png',
+                    'assets/cloud_9_kitchen_market_logo.png',
                     height: compact ? 12 : 18,
                     fit: BoxFit.contain,
                     errorBuilder: (ctx, err, stack) => const SizedBox(),
@@ -473,7 +675,7 @@ class _PromoPreview extends StatelessWidget {
               child: Row(
                 children: [
                   Image.asset(
-                    'assets/logo.png',
+                    'assets/cloud_9_kitchen_market_logo.png',
                     height: compact ? 10 : 14,
                     fit: BoxFit.contain,
                     errorBuilder: (ctx, err, stack) => const SizedBox(),
@@ -685,6 +887,10 @@ Future<void> showLabelPreviewSheet(
   ValueChanged<({double wasPrice, String promoEnds, String saveText})>?
       onPromoChanged,
   VoidCallback? onPromoCleared,
+  ({String shelfLoc, String verifyDate, String slot, String dept,
+          String allergens, bool taxable, String eachText})? initialShelf,
+  ValueChanged<({String shelfLoc, String verifyDate, String slot, String dept,
+          String allergens, bool taxable, String eachText})>? onShelfChanged,
 }) {
   final sizeCtrl = TextEditingController(text: initialSize ?? model.size);
   final wasCtrl = TextEditingController(
@@ -695,6 +901,23 @@ Future<void> showLabelPreviewSheet(
       TextEditingController(text: initialPromo?.promoEnds ?? '');
   final saveCtrl =
       TextEditingController(text: initialPromo?.saveText ?? '');
+  final shelf = initialShelf ??
+      (
+        shelfLoc: model.shelfLoc,
+        verifyDate: model.verifyDate,
+        slot: model.slot,
+        dept: model.dept,
+        allergens: model.allergens,
+        taxable: model.taxable,
+        eachText: model.eachText,
+      );
+  final locCtrl = TextEditingController(text: shelf.shelfLoc);
+  final verCtrl = TextEditingController(text: shelf.verifyDate);
+  final slotCtrl = TextEditingController(text: shelf.slot);
+  final deptCtrl = TextEditingController(text: shelf.dept);
+  final algCtrl = TextEditingController(text: shelf.allergens);
+  final eachCtrl = TextEditingController(text: shelf.eachText);
+  var taxable = shelf.taxable;
   return showModalBottomSheet(
     context: context,
     showDragHandle: true,
@@ -793,6 +1016,93 @@ Future<void> showLabelPreviewSheet(
                     ],
                   ),
                 ],
+              ),
+            ],
+            if (onShelfChanged != null &&
+                model.kind == LabelKind.standard) ...[
+              const SizedBox(height: 8),
+              StatefulBuilder(
+                builder: (ctx, setTileState) => ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: Text(
+                    t('sheet_shelf'),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  children: [
+                    TextField(
+                      controller: locCtrl,
+                      decoration: InputDecoration(
+                        labelText: t('sheet_shelf_loc'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: verCtrl,
+                      decoration: InputDecoration(
+                        labelText: t('sheet_shelf_verify'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: slotCtrl,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        labelText: t('sheet_shelf_slot'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: deptCtrl,
+                      decoration: InputDecoration(
+                        labelText: t('sheet_shelf_dept'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: algCtrl,
+                      decoration: InputDecoration(
+                        labelText: t('sheet_shelf_allergens'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: eachCtrl,
+                      decoration: InputDecoration(
+                        labelText: t('sheet_shelf_each'),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(t('sheet_shelf_taxable')),
+                      value: taxable,
+                      onChanged: (v) =>
+                          setTileState(() => taxable = v ?? false),
+                    ),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () {
+                          onShelfChanged((
+                            shelfLoc: locCtrl.text.trim(),
+                            verifyDate: verCtrl.text.trim(),
+                            slot: slotCtrl.text.trim(),
+                            dept: deptCtrl.text.trim(),
+                            allergens: algCtrl.text.trim(),
+                            taxable: taxable,
+                            eachText: eachCtrl.text.trim(),
+                          ));
+                        },
+                        child: Text(t('sheet_shelf_apply')),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ],

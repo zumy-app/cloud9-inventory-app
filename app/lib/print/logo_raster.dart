@@ -1,7 +1,8 @@
 // 1-bit logo raster for 2"x1" thermal labels.
-// Decodes assets/logo.png, downscales to the TSPL dot budget
-// (Tspl.maxLogoWidthDots x Tspl.maxLogoHeightDots), Floyd-Steinberg
-// dithers to 1-bit, caches in memory. Failures return null so labels
+// Decodes the Kitchen & Market label logo, downscales to the TSPL dot
+// budget
+// (Tspl.maxLogoWidthDots x Tspl.maxLogoHeightDots), thresholds to
+// 1-bit, caches in memory. Failures return null so labels
 // print without a logo instead of crashing.
 library;
 
@@ -54,22 +55,12 @@ class LogoRaster {
           buf[y * w + x] = overWhite.clamp(0, 255);
         }
       }
-      // Floyd-Steinberg dither to 1-bit (1 = black, like Tspl.compose).
+      // Hard threshold to 1-bit (1 = black, like Tspl.compose). The oval
+      // is flat spot-art: dithering turns its orange field into noise, so
+      // print the orange/navy as black and only the white script as white.
       final mono = List<int>.filled(w * h, 0);
-      for (var y = 0; y < h; y++) {
-        for (var x = 0; x < w; x++) {
-          final i = y * w + x;
-          final old = buf[i];
-          final next = old < 128 ? 0.0 : 255.0;
-          mono[i] = next == 0.0 ? 1 : 0;
-          final err = old - next;
-          if (x + 1 < w) buf[i + 1] += err * 7 / 16;
-          if (y + 1 < h) {
-            if (x > 0) buf[i + w - 1] += err * 3 / 16;
-            buf[i + w] += err * 5 / 16;
-            if (x + 1 < w) buf[i + w + 1] += err * 1 / 16;
-          }
-        }
+      for (var i = 0; i < buf.length; i++) {
+        mono[i] = buf[i] < 200 ? 1 : 0;
       }
       return (mono: mono, width: w, height: h);
     } catch (_) {
@@ -83,9 +74,11 @@ class LogoRaster {
     return s >= 1.0 ? 1.0 : s;
   }
 
-  /// Load + rasterize the bundled store logo (cached per max-size).
+  /// Load + rasterize the bundled label logo (cached per max-size).
+  /// Labels always use the Kitchen & Market oval; the TEAM oval stays
+  /// on app chrome (login/home) only.
   static Future<({List<int> mono, int width, int height})?> bundled({
-    String asset = 'assets/logo.png',
+    String asset = 'assets/cloud_9_kitchen_market_logo.png',
     int maxWidth = Tspl.maxLogoWidthDots,
     int maxHeight = Tspl.maxLogoHeightDots,
   }) async {

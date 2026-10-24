@@ -1,5 +1,5 @@
 name: cloud9_inventory_app
-description: "A new Flutter project."
+description: "Cloud 9 Market staff inventory management and shelf-label printing."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+6
+version: 1.0.1+9
 
 environment:
   sdk: ^3.12.2
@@ -43,6 +43,9 @@ dependencies:
   share_plus: ^11.0.0
   image: ^4.10.1
   barcode_widget: ^2.0.4
+  print_bluetooth_thermal: ^1.2.5
+  permission_handler: ^13.0.2
+  android_intent_plus: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +58,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+  flutter_secure_storage_platform_interface: ^1.1.2
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -67,9 +71,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # Brand logo (Cloud9 TEAM oval) — also the launcher icon source.
+  # Brand logos: TEAM oval = app chrome (login/home); Kitchen & Market
+  # oval = shelf labels only (preview + thermal BITMAP).
   assets:
     - assets/logo.png
+    - assets/cloud_9_kitchen_market_logo.png
 
   # Label preview typography (wireframe DESIGN.md tokens, OFL-licensed
   # Google Fonts, bundled so previews render offline in the store).

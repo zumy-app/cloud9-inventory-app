@@ -45,6 +45,16 @@ class CollectionLine {
   String promoEnds;
   String saveText;
 
+  /// Type 01 shelf-tag payload (docs/06). Absent in old JSON loads as
+  /// "unset" (tolerant fromJson below) so legacy lines render unchanged.
+  String shelfLoc;
+  String verifyDate;
+  String slot;
+  String dept;
+  String allergens;
+  bool taxable;
+  String eachText;
+
   CollectionLine({
     required this.barcode,
     required this.name,
@@ -59,6 +69,13 @@ class CollectionLine {
     this.wasPrice,
     this.promoEnds = '',
     this.saveText = '',
+    this.shelfLoc = '',
+    this.verifyDate = '',
+    this.slot = '',
+    this.dept = '',
+    this.allergens = '',
+    this.taxable = false,
+    this.eachText = '',
   }) : addedAt = addedAt ?? DateTime.now();
 
   LabelModel get model => LabelModel(
@@ -73,6 +90,13 @@ class CollectionLine {
     wasPrice: wasPrice,
     promoEnds: promoEnds,
     saveText: saveText,
+    shelfLoc: shelfLoc,
+    verifyDate: verifyDate,
+    slot: slot,
+    dept: dept,
+    allergens: allergens,
+    taxable: taxable,
+    eachText: eachText,
   );
 
   Map<String, dynamic> toJson() => {
@@ -89,6 +113,13 @@ class CollectionLine {
     'wasPrice': wasPrice,
     'promoEnds': promoEnds,
     'saveText': saveText,
+    'shelfLoc': shelfLoc,
+    'verifyDate': verifyDate,
+    'slot': slot,
+    'dept': dept,
+    'allergens': allergens,
+    'taxable': taxable,
+    'eachText': eachText,
   };
 
   static LabelKind _kindOf(dynamic v) {
@@ -117,7 +148,77 @@ class CollectionLine {
         : null,
     promoEnds: (m['promoEnds'] ?? '').toString(),
     saveText: (m['saveText'] ?? '').toString(),
+    shelfLoc: (m['shelfLoc'] ?? '').toString(),
+    verifyDate: (m['verifyDate'] ?? '').toString(),
+    slot: (m['slot'] ?? '').toString(),
+    dept: (m['dept'] ?? '').toString(),
+    allergens: (m['allergens'] ?? '').toString(),
+    taxable: m['taxable'] is bool ? m['taxable'] as bool : false,
+    eachText: (m['eachText'] ?? '').toString(),
   );
+}
+
+/// Store-level Type 01 defaults (docs/06 §3): set once per store,
+/// stamped onto new picks by [_insert]. In-memory cache with
+/// SharedPreferences backing; [load] is cheap after the first call.
+class LabelDefaults {
+  static String shelfLoc = '';
+  static String verifyDate = '';
+  static String slot = '';
+  static String dept = '';
+  static String eachText = '';
+  static bool _loaded = false;
+
+  static Future<void> load() async {
+    if (_loaded) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      shelfLoc = p.getString('lbl_def_shelf') ?? '';
+      verifyDate = p.getString('lbl_def_verify') ?? '';
+      slot = p.getString('lbl_def_slot') ?? '';
+      dept = p.getString('lbl_def_dept') ?? '';
+      eachText = p.getString('lbl_def_each') ?? '';
+    } catch (_) {
+      // Prefs unavailable (e.g. tests) -> empty defaults.
+    }
+    _loaded = true;
+  }
+
+  static Future<void> save({
+    String? shelfLoc,
+    String? verifyDate,
+    String? slot,
+    String? dept,
+    String? eachText,
+  }) async {
+    if (shelfLoc != null) LabelDefaults.shelfLoc = shelfLoc.trim();
+    if (verifyDate != null) LabelDefaults.verifyDate = verifyDate.trim();
+    if (slot != null) LabelDefaults.slot = slot.trim();
+    if (dept != null) LabelDefaults.dept = dept.trim();
+    if (eachText != null) {
+      LabelDefaults.eachText = eachText.trim().toUpperCase();
+    }
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString('lbl_def_shelf', LabelDefaults.shelfLoc);
+      await p.setString('lbl_def_verify', LabelDefaults.verifyDate);
+      await p.setString('lbl_def_slot', LabelDefaults.slot);
+      await p.setString('lbl_def_dept', LabelDefaults.dept);
+      await p.setString('lbl_def_each', LabelDefaults.eachText);
+    } catch (_) {
+      // Persist best-effort; the in-memory values still apply this run.
+    }
+  }
+
+  /// Test-only reset (no prefs I/O).
+  static void resetForTest() {
+    shelfLoc = '';
+    verifyDate = '';
+    slot = '';
+    dept = '';
+    eachText = '';
+    _loaded = true;
+  }
 }
 
 class LabelCollection {
@@ -450,6 +551,13 @@ class LabelCollections extends ChangeNotifier {
       defaultCode: defaultCode,
       category: category,
       variantId: variantId,
+      // Store defaults stamp new picks (docs/06 §3); per-line sheet
+      // edits override afterwards. Merged lines keep their values.
+      shelfLoc: LabelDefaults.shelfLoc,
+      verifyDate: LabelDefaults.verifyDate,
+      slot: LabelDefaults.slot,
+      dept: LabelDefaults.dept,
+      eachText: LabelDefaults.eachText,
     );
     c.lines.add(line);
     if (!quiet) {
@@ -506,6 +614,13 @@ class LabelCollections extends ChangeNotifier {
       wasPrice: l.wasPrice,
       promoEnds: l.promoEnds,
       saveText: l.saveText,
+      shelfLoc: l.shelfLoc,
+      verifyDate: l.verifyDate,
+      slot: l.slot,
+      dept: l.dept,
+      allergens: l.allergens,
+      taxable: l.taxable,
+      eachText: l.eachText,
     );
     active!.touch();
     notifyListeners();
@@ -534,6 +649,30 @@ class LabelCollections extends ChangeNotifier {
     l.wasPrice = null;
     l.promoEnds = '';
     l.saveText = '';
+    active?.touch();
+    notifyListeners();
+    _save();
+  }
+
+  /// Attach a Type 01 shelf-tag payload to a line (docs/06 §3).
+  /// Empty strings clear that zone (hide-when-empty render rule).
+  void setShelf(
+    CollectionLine l, {
+    String? shelfLoc,
+    String? verifyDate,
+    String? slot,
+    String? dept,
+    String? allergens,
+    bool? taxable,
+    String? eachText,
+  }) {
+    if (shelfLoc != null) l.shelfLoc = shelfLoc.trim();
+    if (verifyDate != null) l.verifyDate = verifyDate.trim();
+    if (slot != null) l.slot = slot.trim();
+    if (dept != null) l.dept = dept.trim();
+    if (allergens != null) l.allergens = allergens.trim().toUpperCase();
+    if (taxable != null) l.taxable = taxable;
+    if (eachText != null) l.eachText = eachText.trim().toUpperCase();
     active?.touch();
     notifyListeners();
     _save();

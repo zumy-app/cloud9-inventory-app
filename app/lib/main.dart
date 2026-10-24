@@ -7,9 +7,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'batch_store.dart';
 import 'i18n/lang.dart';
 import 'odoo_client.dart';
+import 'print/printer_service.dart';
+import 'print/spp_transport.dart';
 import 'screens/batch.dart';
 import 'screens/inventory_home.dart';
 import 'screens/login.dart';
+import 'screens/privacy_policy.dart';
 import 'session_store.dart';
 import 'widgets/lang_switch.dart';
 
@@ -17,6 +20,9 @@ import 'widgets/lang_switch.dart';
 /// orange field, white lettering, near-black outline.
 const _brandOrange = Color(0xFFF26522);
 const _brandInk = Color(0xFF141414);
+
+/// Keep in sync with pubspec.yaml (shown on the Account tab).
+const _appVersion = '1.0.1';
 
 ThemeData _brandTheme() {
   const scheme = ColorScheme.light(
@@ -129,6 +135,16 @@ class _Cloud9AppState extends State<Cloud9App> {
     } catch (_) {
       // Secure storage unavailable (e.g. widget test) -> stay logged out.
     }
+    try {
+      // Real Bluetooth transport + saved printer address before any tab
+      // can print. loadSettings is time-bounded and never throws, so a
+      // printer problem can never block boot (printer is optional; the
+      // error surfaces when printing instead).
+      PrinterService.instance.useTransport(SppTransport());
+      await PrinterService.instance.loadSettings();
+    } catch (_) {
+      // Belt and suspenders; see loadSettings.
+    }
     if (mounted) setState(() => _ready = true);
   }
 
@@ -240,6 +256,28 @@ class _AccountTab extends StatelessWidget {
           const SizedBox(height: 4),
           Text(t('account_language_note'),
               style: const TextStyle(color: Colors.grey)),
+          const Divider(height: 32),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.privacy_tip_outlined),
+            title: Text(t('account_privacy')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const PrivacyPolicyScreen(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            Lang.instance.f('account_version', {'version': _appVersion}),
+            style: const TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            t('account_managed_note'),
+            style: const TextStyle(color: Colors.grey),
+          ),
           const SizedBox(height: 24),
           SizedBox(
             height: 52,

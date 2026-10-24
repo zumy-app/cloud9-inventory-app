@@ -159,6 +159,40 @@ void main() {
     });
     expect(legacy.kind, LabelKind.standard);
     expect(legacy.model.kind, LabelKind.standard);
+    // Legacy JSON without shelf keys loads unset (renders as before).
+    expect(legacy.shelfLoc, isEmpty);
+    expect(legacy.taxable, isFalse);
+    expect(legacy.eachText, isEmpty);
+    expect(legacy.model.taxable, isFalse);
+  });
+
+  test('shelf payload persists and size edits preserve it', () {
+    final store = LabelCollections.instance;
+    store.create('Grocery');
+    final l = store.addToActive(barcode: '1', name: 'Wrap', price: 7.49);
+    store.setShelf(l,
+        shelfLoc: 'AISLE 04-B2',
+        verifyDate: '10/24',
+        slot: 'MK-203D\nST-084',
+        dept: '04',
+        allergens: 'CONTAINS MILK',
+        taxable: true,
+        eachText: 'EACH');
+    final back =
+        LabelCollection.fromJson(store.active!.toJson()).lines.single;
+    expect(back.shelfLoc, 'AISLE 04-B2');
+    expect(back.verifyDate, '10/24');
+    expect(back.slot, 'MK-203D\nST-084');
+    expect(back.dept, '04');
+    expect(back.allergens, 'CONTAINS MILK');
+    expect(back.taxable, isTrue);
+    expect(back.eachText, 'EACH');
+    expect(back.model.dept, '04');
+    // Size edit preserves the shelf payload (no silent wipe).
+    store.updateSize(l, '12.4 oz');
+    final after = store.activeLines.single;
+    expect(after.shelfLoc, 'AISLE 04-B2');
+    expect(after.taxable, isTrue);
   });
 
   test('serialization round-trips', () {

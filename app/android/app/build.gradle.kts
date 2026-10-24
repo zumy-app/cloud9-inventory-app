@@ -14,7 +14,9 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "app.zumy.cloud9.employee"
-    compileSdk = flutter.compileSdkVersion
+    // 37: permission_handler_android requires compileSdk 37+ (its own
+    // demand, backward compatible at runtime; targetSdk untouched).
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

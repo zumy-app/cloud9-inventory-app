@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Type 01 Mockup — Standard Retail Everyday (proposed)</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800;900&family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #f3f3f4; color: #111; font-family: "Space Grotesk", Arial, sans-serif; padding: 24px; }
+  h1 { font-family: "Barlow Condensed", sans-serif; font-size: 28px; text-transform: uppercase; }
+  .sub { font-family: "Space Mono", monospace; font-size: 12px; color: #555; margin: 4px 0 20px; }
+  h2 { font-family: "Barlow Condensed", sans-serif; font-size: 20px; text-transform: uppercase; margin: 28px 0 8px; }
+  .row { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+  .cap { font-family: "Space Mono", monospace; font-size: 11px; color: #555; margin-bottom: 6px; }
+
+  /* ===== Label canvas: exactly 406 x 203 (wireframe footprint) ===== */
+  .tag {
+    width: 406px; height: 203px; min-width: 406px; min-height: 203px;
+    background: #fff; color: #000; border: 2px solid #000;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 8px; overflow: hidden; position: relative;
+  }
+  .zoom2-wrap { width: 812px; height: 406px; }
+  .zoom2 { transform: scale(2); transform-origin: top left; }
+
+  .t-header { display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 4px; border-bottom: 2px solid #000; background: #fff; }
+  .t-brand { display: flex; align-items: center; gap: 8px; }
+  .logo-oval {
+    background: #FF6A00; color: #fff; border-radius: 50%;
+    font-family: "Barlow Condensed", sans-serif; font-weight: 900;
+    font-size: 13px; line-height: 1; padding: 9px 10px; white-space: nowrap;
+  }
+  .slot { border-left: 1px solid #000; padding-left: 6px; line-height: 1.25; }
+  .slot span { display: block; font-family: "Space Mono", monospace; font-weight: 700; text-transform: uppercase; }
+  .slot .s1 { font-size: 8px; } .slot .s2 { font-size: 7px; }
+  .t-loc { text-align: right; }
+  .t-loc .shelf { font-family: "Space Mono", monospace; font-size: 9px; font-weight: 700;
+    text-transform: uppercase; display: block; }
+  .t-loc .row2 { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; }
+  .chip-black { background: #000; color: #fff; font-family: "Space Mono", monospace;
+    font-size: 7px; font-weight: 700; padding: 1px 4px; }
+  .micro7 { font-family: "Space Mono", monospace; font-size: 7px; font-weight: 700; }
+
+  .t-title { padding: 4px 0; border-bottom: 1px solid #000; }
+  .t-title h3 { font-family: "Barlow Condensed", sans-serif; font-size: 18px; line-height: 18px;
+    font-weight: 900; text-transform: uppercase; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; letter-spacing: -0.01em; }
+  .t-sub { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
+  .t-sub .desc { font-family: "Space Grotesk", sans-serif; font-size: 8px; font-weight: 700; }
+  .chip-box { font-family: "Space Mono", monospace; font-size: 7px; font-weight: 700;
+    text-transform: uppercase; border: 1px solid #000; background: #e2e2e2; padding: 0 4px; }
+
+  .t-lower { flex: 1; display: flex; align-items: stretch; justify-content: space-between;
+    padding-top: 4px; gap: 4px; min-height: 0; }
+  .t-left { width: 48%; display: flex; flex-direction: column; justify-content: space-between;
+    padding-right: 4px; }
+  .bars { display: flex; align-items: stretch; justify-content: center; gap: 1.5px;
+    height: 40px; padding: 0 2px 2px; border-bottom: 1px solid #000; overflow: hidden; }
+  .bars i { background: #000; display: block; }
+  .digits { font-family: "Space Mono", monospace; font-size: 9px; font-weight: 700;
+    letter-spacing: 0.18em; text-align: center; margin-top: 2px; }
+  .unitbar { margin-top: 4px; background: #000; color: #fff; display: flex;
+    justify-content: space-between; align-items: center; padding: 2px 6px; }
+  .unitbar .k { font-family: "Space Mono", monospace; font-size: 7px; font-weight: 700;
+    letter-spacing: 0.08em; }
+  .unitbar .v { font-family: "Space Mono", monospace; font-size: 9px; font-weight: 700; }
+  .t-divider { width: 2px; background: #000; align-self: stretch; }
+  .t-right { width: 52%; display: flex; flex-direction: column; justify-content: space-between;
+    align-items: flex-end; padding-left: 4px; }
+  .t-badge-row { width: 100%; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #000; padding-bottom: 2px; }
+  .badge { background: #000; color: #fff; font-family: "Barlow Condensed", sans-serif;
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em;
+    padding: 2px 6px; line-height: 1; }
+  .dept { font-family: "Space Mono", monospace; font-size: 8px; font-weight: 700; }
+  .hero { width: 100%; display: flex; align-items: flex-start; justify-content: flex-end;
+    line-height: 1; padding: 2px 0; }
+  .hero .cur { font-family: "Barlow Condensed", sans-serif; font-size: 26px; font-weight: 900;
+    padding-top: 4px; margin-right: 2px; }
+  .hero .int { font-family: "Barlow Condensed", sans-serif; font-size: 64px; line-height: 50px;
+    font-weight: 900; letter-spacing: -0.03em; }
+  .hero .col { display: flex; flex-direction: column; align-items: flex-start; margin-left: 2px; }
+  .hero .cents { font-family: "Barlow Condensed", sans-serif; font-size: 26px; line-height: 22px; font-weight: 900; }
+  .hero .each { font-family: "Space Mono", monospace; font-size: 7px; font-weight: 700;
+    text-transform: uppercase; margin-top: 4px; }
+  .gs1 { width: 100%; background: #000; color: #fff; text-align: center;
+    font-family: "Space Mono", monospace; font-size: 7px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 0; }
+
+  /* annotated callouts */
+  .tag.annotated [data-f] { outline: 2px dashed #FF6A00; outline-offset: -2px; position: relative; }
+  .legend { font-family: "Space Mono", monospace; font-size: 12px; line-height: 1.7; max-width: 520px; }
+  .legend b { background: #FF6A00; color: #fff; padding: 0 6px; margin-right: 6px; }
+  .legend .new { color: #a14000; font-weight: 700; }
+  .note { font-size: 13px; color: #444; max-width: 900px; margin-top: 12px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<h1>Type 01 — Standard Retail Everyday (proposed)</h1>
+<p class="sub">406 × 203 canvas · same example data as code.html Card 1 · orange dashed = annotated section below</p>
+
+<h2>1 · Clean label</h2>
+<div class="row">
+  <div><p class="cap">1:1 — 406 × 203</p>
+    <div class="tag">
+      <div class="t-header">
+        <div class="t-brand">
+          <div class="logo-oval">Cloud 9</div>
+          <div class="slot"><span class="s1">MK-203D</span><span class="s2">ST-084</span></div>
+        </div>
+        <div class="t-loc">
+          <span class="shelf">AISLE 04-B2 • DELI FRESH</span>
+          <div class="row2"><span class="chip-black">VERIF: 10/24</span><span class="micro7">C9-GROC</span></div>
+        </div>
+      </div>
+      <div class="t-title">
+        <h3>C9 ARTISAN ROAST TURKEY CLUB WRAP</h3>
+        <div class="t-sub">
+          <span class="desc">12.4 OZ (351g) • CONTAINS GLUTEN/DAIRY</span>
+          <span class="chip-box">TAXABLE</span>
+        </div>
+      </div>
+      <div class="t-lower">
+        <div class="t-left">
+          <div>
+            <div class="bars"><i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:4px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:2px"></i><i style="width:1px"></i><i style="width:4px"></i><i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:4px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:4px"></i><i style="width:1px"></i></div>
+            <div class="digits">0 48192 73019 4</div>
+          </div>
+          <div class="unitbar"><span class="k">UNIT PRICE:</span><span class="v">$0.62 / OZ</span></div>
+        </div>
+        <div class="t-divider"></div>
+        <div class="t-right">
+          <div class="t-badge-row"><span class="badge">EVERYDAY RETAIL</span><span class="dept">DEPT 04</span></div>
+          <div class="hero"><span class="cur">$</span><span class="int">7</span><span class="col"><span class="cents">49</span><span class="each">EACH</span></span></div>
+          <div class="gs1">GS1 COMPLIANT SHELF EDGE</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div><p class="cap">2x zoom</p>
+    <div class="zoom2-wrap"><div class="tag zoom2">
+      <div class="t-header">
+        <div class="t-brand">
+          <div class="logo-oval">Cloud 9</div>
+          <div class="slot"><span class="s1">MK-203D</span><span class="s2">ST-084</span></div>
+        </div>
+        <div class="t-loc">
+          <span class="shelf">AISLE 04-B2 • DELI FRESH</span>
+          <div class="row2"><span class="chip-black">VERIF: 10/24</span><span class="micro7">C9-GROC</span></div>
+        </div>
+      </div>
+      <div class="t-title">
+        <h3>C9 ARTISAN ROAST TURKEY CLUB WRAP</h3>
+        <div class="t-sub">
+          <span class="desc">12.4 OZ (351g) • CONTAINS GLUTEN/DAIRY</span>
+          <span class="chip-box">TAXABLE</span>
+        </div>
+      </div>
+      <div class="t-lower">
+        <div class="t-left">
+          <div>
+            <div class="bars"><i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:4px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:2px"></i><i style="width:1px"></i><i style="width:4px"></i><i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:4px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:3px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:4px"></i><i style="width:1px"></i></div>
+            <div class="digits">0 48192 73019 4</div>
+          </div>
+          <div class="unitbar"><span class="k">UNIT PRICE:</span><span class="v">$0.62 / OZ</span></div>
+        </div>
+        <div class="t-divider"></div>
+        <div class="t-right">
+          <div class="t-badge-row"><span class="badge">EVERYDAY RETAIL</span><span class="dept">DEPT 04</span></div>
+          <div class="hero"><span class="cur">$</span><span class="int">7</span><span class="col"><span class="cents">49</span><span class="each">EACH</span></span></div>
+          <div class="gs1">GS1 COMPLIANT SHELF EDGE</div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<h2>2 · Where each zone's data comes from</h2>
+<div class="row">
+  <div class="tag annotated">
+    <div class="t-header" data-f>
+      <div class="t-brand">
+        <div class="logo-oval">Cloud 9</div>
+        <div class="slot"><span class="s1">MK-203D</span><span class="s2">ST-084</span></div>
+      </div>
+      <div class="t-loc">
+        <span class="shelf">AISLE 04-B2 • DELI FRESH</span>
+        <div class="row2"><span class="chip-black">VERIF: 10/24</span><span class="micro7">C9-GROC</span></div>
+      </div>
+    </div>
+    <div class="t-title" data-f>
+      <h3>C9 ARTISAN ROAST TURKEY CLUB WRAP</h3>
+      <div class="t-sub"><span class="desc">12.4 OZ (351g) • CONTAINS GLUTEN/DAIRY</span><span class="chip-box">TAXABLE</span></div>
+    </div>
+    <div class="t-lower">
+      <div class="t-left" data-f>
+        <div><div class="bars"><i style="width:2px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:2px"></i><i style="width:4px"></i><i style="width:1px"></i><i style="width:3px"></i><i style="width:2px"></i><i style="width:4px"></i><i style="width:1px"></i><i style="width:2px"></i><i style="width:3px"></i></div>
+        <div class="digits">0 48192 73019 4</div></div>
+        <div class="unitbar"><span class="k">UNIT PRICE:</span><span class="v">$0.62 / OZ</span></div>
+      </div>
+      <div class="t-divider"></div>
+      <div class="t-right" data-f>
+        <div class="t-badge-row"><span class="badge">EVERYDAY RETAIL</span><span class="dept">DEPT 04</span></div>
+        <div class="hero"><span class="cur">$</span><span class="int">7</span><span class="col"><span class="cents">49</span><span class="each">EACH</span></span></div>
+        <div class="gs1">GS1 COMPLIANT SHELF EDGE</div>
+      </div>
+    </div>
+  </div>
+  <div class="legend">
+    <div><b>A</b>Header — logo: bundled asset (exists). <span class="new">NEW: slot codes (MK-203D/ST-084), shelfLoc, verifyDate; C9-GROC ← category.</span></div>
+    <div><b>B</b>Title — displayName, single line + ellipsis. <span class="new">NEW: allergens text, taxable flag (TAXABLE chip hidden when false).</span></div>
+    <div><b>C</b>Barcode bay — code (barcode → SKU fallback); digits always printed under bars; unit bar is black knockout, computed $/unit. Missing code → explicit "ADD BARCODE" state, never blank.</div>
+    <div><b>D</b>Price block — price hero at 64px int (was 44px). <span class="new">NEW: dept (DEPT 04), eachText (EACH).</span> EVERYDAY RETAIL badge + GS1 band are static wireframe furniture. RETAIL chip is dropped.</div>
+  </div>
+</div>
+
+<p class="note">Notes: bars above are illustrative CSS (real bars come from the barcode engine + TSPL BARCODE command, same as today).
+Logo shown as orange oval here = digital-proof mode; thermal print stays 1-bit black per DESIGN.md. Print margins/quiet zones are enforced in TSPL, not visible in this mockup.
+If section 2's mapping looks right, I'll implement it in <code>label_model.dart</code> + <code>label_preview.dart</code> + <code>tspl.dart</code> with test updates.</p>
+
+</body>
+</html>

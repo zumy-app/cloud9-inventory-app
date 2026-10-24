@@ -173,7 +173,7 @@ class _PrintJobScreenState extends State<PrintJobScreen> {
                                   }),
                                 ),
                               SizedBox(
-                                width: 140,
+                                width: 180,
                                 child: LabelPreview(
                                     model: jl.model, compact: true),
                               ),
