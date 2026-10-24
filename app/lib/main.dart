@@ -194,7 +194,10 @@ class _Cloud9AppState extends State<Cloud9App> {
                     body: IndexedStack(
                       index: _tab,
                       children: [
-                        InventoryHome(client: _client, user: _user),
+                        InventoryHome(
+                            client: _client,
+                            user: _user,
+                            sessionCookie: _client.sessionCookie ?? ''),
                         BatchScreen(client: _client, user: _user),
                         _AccountTab(
                             user: _user,

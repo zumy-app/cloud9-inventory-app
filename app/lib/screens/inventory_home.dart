@@ -6,14 +6,21 @@ import 'package:flutter/material.dart';
 import '../i18n/lang.dart';
 import '../odoo_client.dart';
 import 'add_item.dart';
+import 'attendance.dart';
 import 'browse.dart';
+import 'odoo_hub.dart';
 import 'receive.dart';
 import 'waste.dart';
 
 class InventoryHome extends StatelessWidget {
   final OdooClient client;
   final String user;
-  const InventoryHome({super.key, required this.client, required this.user});
+  final String sessionCookie;
+  const InventoryHome(
+      {super.key,
+      required this.client,
+      required this.user,
+      this.sessionCookie = ''});
 
   void _go(BuildContext context, Widget page) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
@@ -71,6 +78,25 @@ class InventoryHome extends StatelessWidget {
             subtitle: t('home_waste_sub'),
             onTap: () =>
                 _go(context, WasteScreen(client: client, user: user)),
+          ),
+          _tile(
+            context,
+            icon: Icons.timer_outlined,
+            title: t('home_att'),
+            subtitle: t('home_att_sub'),
+            onTap: () =>
+                _go(context, AttendanceScreen(client: client, user: user)),
+          ),
+          _tile(
+            context,
+            icon: Icons.point_of_sale,
+            title: t('home_hub'),
+            subtitle: t('home_hub_sub'),
+            onTap: () => _go(
+                context,
+                OdooHubScreen(
+                    baseUrl: client.baseUrl,
+                    sessionCookie: sessionCookie)),
           ),
         ],
       ),

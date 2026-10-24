@@ -829,6 +829,195 @@ class OdooClient {
       }
     ]);
   }
+
+  /// ---- Attendance (hr.attendance, no custom Odoo module) ----
+  ///
+  /// Graceful when the Attendance app isn't installed: every method throws
+  /// OdooException('ATTENDANCE_UNAVAILABLE') and the UI shows setup help.
+
+  /// Employee linked to the current Odoo user (hr.employee.user_id).
+  Future<AttendanceEmployee> myEmployee() async {
+    dynamic result;
+    try {
+      result = await callKw('hr.employee', 'search_read', [], kwargs: {
+        'domain': [
+          ['user_id', '=', await _currentUid()],
+        ],
+        'fields': ['id', 'name'],
+        'limit': 1,
+      });
+    } catch (e) {
+      throw OdooException(_attendanceUnavailable(e));
+    }
+    final rows = (result as List);
+    if (rows.isEmpty) throw OdooException('ATTENDANCE_NO_EMPLOYEE');
+    final m = (rows.first as Map).cast<String, dynamic>();
+    return AttendanceEmployee(
+      id: (m['id'] as num).toInt(),
+      name: (m['name'] ?? '').toString(),
+    );
+  }
+
+  Future<int> _currentUid() async {
+    if (debugUid != null) return debugUid!;
+    // Standard Odoo session info carries the uid; no extra storage needed.
+    try {
+      final r = await _http.post(
+        Uri.parse('$_base/web/session/get_session_info'),
+        headers: _headers,
+        body: jsonEncode({'jsonrpc': '2.0', 'params': {}}),
+      );
+      final body = _decode(r);
+      final result = body['result'];
+      if (result is Map && result['uid'] is num) {
+        return (result['uid'] as num).toInt();
+      }
+    } catch (_) {}
+    return 0;
+  }
+
+  // Test hook for the uid (production reads it from the live session).
+  int? debugUid;
+
+  /// Open attendance (check_out == False), if any.
+  Future<AttendanceRecord?> openAttendance(int employeeId) async {
+    dynamic result;
+    try {
+      result = await callKw('hr.attendance', 'search_read', [], kwargs: {
+        'domain': [
+          ['employee_id', '=', employeeId],
+          ['check_out', '=', false],
+        ],
+        'fields': ['id', 'check_in', 'check_out'],
+        'limit': 1,
+        'order': 'check_in desc',
+      });
+    } catch (e) {
+      throw OdooException(_attendanceUnavailable(e));
+    }
+    final rows = (result as List);
+    if (rows.isEmpty) return null;
+    return AttendanceRecord.fromMap(
+        (rows.first as Map).cast<String, dynamic>());
+  }
+
+  static String _odooTs(DateTime d) {
+    final u = d.toUtc();
+    String p(int n) => n.toString().padLeft(2, '0');
+    return '${u.year}-${p(u.month)}-${p(u.day)} ${p(u.hour)}:${p(u.minute)}:${p(u.second)}';
+  }
+
+  /// Clock in: creates hr.attendance with check_in = now (UTC).
+  Future<AttendanceRecord> clockIn(int employeeId, {DateTime? at}) async {
+    final ts = _odooTs(at ?? DateTime.now());
+    dynamic id;
+    try {
+      id = await callKw('hr.attendance', 'create', [
+        {'employee_id': employeeId, 'check_in': ts}
+      ]);
+    } catch (e) {
+      throw OdooException(_attendanceUnavailable(e));
+    }
+    return AttendanceRecord(
+        id: (id as num).toInt(), checkIn: ts, checkOut: '');
+  }
+
+  /// Clock out: writes check_out = now on the open record.
+  Future<void> clockOut(int attendanceId, {DateTime? at}) async {
+    try {
+      await callKw('hr.attendance', 'write', [
+        [attendanceId],
+        {'check_out': _odooTs(at ?? DateTime.now())},
+      ]);
+    } catch (e) {
+      throw OdooException(_attendanceUnavailable(e));
+    }
+  }
+
+  /// Recent attendances for hours + history UI.
+  Future<List<AttendanceRecord>> attendanceHistory(int employeeId,
+      {int limit = 30}) async {
+    dynamic result;
+    try {
+      result = await callKw('hr.attendance', 'search_read', [], kwargs: {
+        'domain': [
+          ['employee_id', '=', employeeId]
+        ],
+        'fields': ['id', 'check_in', 'check_out'],
+        'limit': limit,
+        'order': 'check_in desc',
+      });
+    } catch (e) {
+      throw OdooException(_attendanceUnavailable(e));
+    }
+    return (result as List)
+        .map((e) => AttendanceRecord.fromMap(
+            (e as Map).cast<String, dynamic>()))
+        .toList();
+  }
+
+  String _attendanceUnavailable(Object e) {
+    final m = e.toString();
+    if (m.contains('ATTENDANCE_NO_EMPLOYEE')) return 'ATTENDANCE_NO_EMPLOYEE';
+    // Missing model / access rights all surface as unavailable with detail.
+    return 'ATTENDANCE_UNAVAILABLE: $m';
+  }
+}
+
+/// Employee linked to the logged-in Odoo user.
+class AttendanceEmployee {
+  final int id;
+  final String name;
+  const AttendanceEmployee({required this.id, required this.name});
+}
+
+/// One hr.attendance row. Odoo timestamps are 'yyyy-MM-dd HH:mm:ss' UTC.
+class AttendanceRecord {
+  final int id;
+  final String checkIn;
+  final String checkOut; // '' = still open
+  const AttendanceRecord(
+      {required this.id, required this.checkIn, required this.checkOut});
+
+  bool get isOpen => checkOut.isEmpty || checkOut == 'false';
+
+  factory AttendanceRecord.fromMap(Map<String, dynamic> m) {
+    Object? out = m['check_out'];
+    return AttendanceRecord(
+      id: (m['id'] as num).toInt(),
+      checkIn: (m['check_in'] ?? '').toString(),
+      checkOut: (out == null || out is bool) ? '' : out.toString(),
+    );
+  }
+
+  static DateTime? _parse(String s) {
+    if (s.isEmpty || s == 'false') return null;
+    try {
+      // Odoo returns naive UTC wall times ('yyyy-MM-dd HH:mm:ss').
+      // Parse as UTC explicitly — parsing as local would skew hours
+      // by the device UTC offset.
+      var t = s.replaceFirst(' ', 'T');
+      if (!t.endsWith('Z') &&
+          !RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(t)) {
+        t = '${t}Z';
+      }
+      return DateTime.parse(t).toUtc();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Public parse of Odoo 'yyyy-MM-dd HH:mm:ss' UTC timestamps.
+  static DateTime? tryParseTs(String s) => _parse(s);
+
+  /// Worked hours for this record (open record counts up to [now]).
+  double hours({DateTime? now}) {
+    final inn = _parse(checkIn);
+    if (inn == null) return 0;
+    final out = _parse(checkOut) ?? (now ?? DateTime.now()).toUtc();
+    final h = out.difference(inn).inMinutes / 60.0;
+    return h < 0 ? 0 : h;
+  }
 }
 
 /// Minimal lot view for waste logging.

@@ -5,14 +5,15 @@ import 'package:flutter/material.dart';
 class PrivacyPolicyScreen extends StatelessWidget {
   const PrivacyPolicyScreen({super.key});
 
-  static const _updated = 'Last updated: October 19, 2026';
+  static const _updated = 'Last updated: October 24, 2026';
 
   static const _sections = <(String, String)>[
     (
       'Who we are',
       'Cloud 9 Team is provided by Cloud 9 Market for authorized staff. '
           'This policy explains what the app does with information when you '
-          'use it to manage inventory and print shelf labels.',
+          'use it to manage inventory, print shelf labels, record attendance, '
+          'and check out customers.',
     ),
     (
       'Information we process',
@@ -23,9 +24,20 @@ class PrivacyPolicyScreen extends StatelessWidget {
           'Inventory: barcodes, product names, quantities, prices, expiry '
           'dates, categories and notes that you scan or enter are sent to the '
           'Cloud 9 Odoo server so the store inventory stays up to date.\n\n'
+          'Attendance: when you clock in or out, the check-in/out time and '
+          'your employee record are stored in the Cloud 9 Odoo server.\n\n'
           'Device settings: the selected Bluetooth printer address, print '
-          'darkness, language preference and recent category choices are '
-          'stored locally on the device.',
+          'darkness, language preference, recent category choices, and the '
+          'calibrated store location are stored locally on the device.',
+    ),
+    (
+      'Location',
+      'Location is used for one purpose only: to confirm you are at the store '
+          'when you clock in or out. Your position is checked on the device '
+          'against the calibrated store geofence at the moment you tap the '
+          'clock button. The app does not track your location in the '
+          'background, does not store a history of your movements, and does '
+          'not send raw coordinates to the server.',
     ),
     (
       'Camera',

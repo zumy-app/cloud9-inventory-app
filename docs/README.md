@@ -10,3 +10,4 @@ Read in order. Start at 01, build 02, defer 03–04 until MVP is in the store.
 * `06-TYPE01-LABEL-REDESIGN.md` — Type 01 retail-label redesign tech plan (approved mockup: `labels-wireframes/type01-mockup.html`). Build this now.
 * `07-BLUETOOTH-PRINTER.md` — Bluetooth printer plan (PM-241Z over Classic SPP): why the app can't see the OS-paired printer, transport, permissions, management UI, test plan.
 * `08-WASTE-LOSS-TRACKING-v2.md` — Waste/loss tracking (scrap-based, IRS-ready): append-only log, disposition-date tax rule, validation/lock, CSV exports. Build on `feature/waste-loss-v2`.
+* `09-ATTENDANCE-POS.md` — GPS-gated clock in/out + hours and in-app Odoo apps / POS checkout. Build on `feature/attendance-pos`.

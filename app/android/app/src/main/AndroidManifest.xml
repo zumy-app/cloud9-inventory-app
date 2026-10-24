@@ -1,10 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Attendance clock in/out is GPS-gated: fine location is used ONLY
+         to verify the employee is inside the store geofence. Requested at
+         runtime on the Attendance screen, never for tracking or ads. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <!-- Label printer (Classic SPP, OS-paired devices only — the app
          never scans; print_bluetooth_thermal's native guard still
          requires SCAN, so request it with neverForLocation to keep
-         location permission out of the flow). -->
+         printer setup from implying location tracking. Location is
+         used only for GPS-gated attendance, requested separately.) -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
