@@ -151,7 +151,6 @@ void main() {
     final ts =
         '${twoH.year}-${p(twoH.month)}-${p(twoH.day)} ${p(twoH.hour)}:${p(twoH.minute)}:00';
     final mock = MockClient((req) async {
-      final body = jsonDecode(req.body) as Map<String, dynamic>;
       final url = req.url.toString();
       if (url.contains('get_session_info')) {
         return http.Response(

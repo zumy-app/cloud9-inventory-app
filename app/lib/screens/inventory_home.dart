@@ -92,11 +92,13 @@ class InventoryHome extends StatelessWidget {
             icon: Icons.point_of_sale,
             title: t('home_hub'),
             subtitle: t('home_hub_sub'),
-            onTap: () => _go(
-                context,
-                OdooHubScreen(
-                    baseUrl: client.baseUrl,
-                    sessionCookie: sessionCookie)),
+              onTap: () => _go(
+                  context,
+                  OdooHubScreen(
+                      baseUrl: client.baseUrl,
+                      client: client,
+                      user: user,
+                      sessionCookie: sessionCookie)),
           ),
         ],
       ),

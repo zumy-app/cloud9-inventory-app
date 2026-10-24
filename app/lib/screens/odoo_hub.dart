@@ -8,17 +8,25 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../i18n/lang.dart';
+import '../odoo_client.dart';
 import '../widgets/feedback.dart';
+import 'pos_checkout.dart';
 import 'scan.dart';
 
-/// Entry hub: POS checkout + Odoo backend, same session.
+/// Entry hub: native POS checkout + Odoo backend WebView.
 class OdooHubScreen extends StatelessWidget {
   final String baseUrl;
+  final OdooClient? client;
+  final String user;
   final String sessionCookie; // "session_id=..." from OdooClient
   const OdooHubScreen(
-      {super.key, required this.baseUrl, this.sessionCookie = ''});
+      {super.key,
+      required this.baseUrl,
+      this.client,
+      this.user = '',
+      this.sessionCookie = ''});
 
-  String get _base => baseUrl.replaceAll(RegExp(r'/+$'), '');
+  String get _base => baseUrl.replaceAll(RegExp(r'/$'), '');
 
   void _open(BuildContext context, String title, String url) {
     Navigator.of(context).push(MaterialPageRoute(
@@ -43,7 +51,11 @@ class OdooHubScreen extends StatelessWidget {
               title: Text(t('hub_pos')),
               subtitle: Text(t('hub_pos_sub')),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => _open(context, t('hub_pos'), '$_base/pos/web'),
+              onTap: client == null
+                  ? null
+                  : () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => PosCheckoutScreen(
+                          client: client!, user: user))),
             ),
           ),
           Card(

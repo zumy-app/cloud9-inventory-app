@@ -962,6 +962,266 @@ class OdooClient {
     // Missing model / access rights all surface as unavailable with detail.
     return 'ATTENDANCE_UNAVAILABLE: $m';
   }
+
+  /// ---- Native POS checkout (no WebView, no second login) ----
+  ///
+  /// Flow: open session -> sellable products -> cart -> tender ->
+  /// pos.order + pos.payment -> action_pos_order_paid.
+  /// Every step throws a descriptive OdooException on failure.
+
+  /// Active POS configs (registers) to sell into.
+  Future<List<PosShop>> posConfigs() async {
+    dynamic result;
+    try {
+      result = await callKw('pos.config', 'search_read', [], kwargs: {
+        'domain': [
+          ['active', '=', true]
+        ],
+        'fields': ['id', 'name'],
+        'order': 'name',
+      });
+    } catch (e) {
+      throw OdooException(_posUnavailable(e));
+    }
+    return (result as List).map((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      return PosShop(
+          id: (m['id'] as num).toInt(), name: (m['name'] ?? '').toString());
+    }).toList();
+  }
+
+  /// Open session for a config, newest first. Null = register closed.
+  Future<PosSession?> openPosSession(int configId) async {
+    dynamic result;
+    try {
+      result = await callKw('pos.session', 'search_read', [], kwargs: {
+        'domain': [
+          ['config_id', '=', configId],
+          ['state', 'in', ['opened', 'opening_control']],
+        ],
+        'fields': ['id', 'name', 'state', 'config_id'],
+        'limit': 1,
+        'order': 'id desc',
+      });
+    } catch (e) {
+      throw OdooException(_posUnavailable(e));
+    }
+    final rows = (result as List);
+    if (rows.isEmpty) return null;
+    final m = (rows.first as Map).cast<String, dynamic>();
+    final cfg = m['config_id'];
+    return PosSession(
+      id: (m['id'] as num).toInt(),
+      name: (m['name'] ?? '').toString(),
+      configId: cfg is List && cfg.isNotEmpty
+          ? (cfg[0] as num).toInt()
+          : configId,
+      state: (m['state'] ?? '').toString(),
+    );
+  }
+
+  /// Sellable products for checkout: name/barcode search, POS-sellable.
+  Future<List<PosProduct>> posProducts(String query, {int limit = 20}) async {
+    final q = query.trim();
+    dynamic result;
+    try {
+      final domain = <dynamic>[
+        ['sale_ok', '=', true],
+      ];
+      if (q.isNotEmpty) {
+        domain.add('|');
+        domain.add(['name', 'ilike', q]);
+        domain.add(['barcode', 'ilike', q]);
+      }
+      result = await callKw('product.product', 'search_read', [], kwargs: {
+        'domain': domain,
+        'fields': [
+          'id',
+          'name',
+          'barcode',
+          'list_price',
+          'taxes_id',
+          'qty_available'
+        ],
+        'limit': limit,
+        'order': 'name',
+      });
+    } catch (e) {
+      throw OdooException(_posUnavailable(e));
+    }
+    return (result as List).map((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      final taxes = m['taxes_id'];
+      return PosProduct(
+        id: (m['id'] as num).toInt(),
+        name: (m['name'] ?? '').toString(),
+        barcode: InventoryProduct._s(m['barcode']),
+        listPrice: InventoryProduct._d(m['list_price']),
+        taxIds: taxes is List
+            ? taxes.map((t) => (t as num).toInt()).toList()
+            : const [],
+        onHand: InventoryProduct._d(m['qty_available']),
+      );
+    }).toList();
+  }
+
+  /// Tax rates for price math (unknown taxes count as 0% — server total
+  /// stays authoritative on the receipt).
+  Future<Map<int, PosTax>> posTaxes(List<int> ids) async {
+    final out = <int, PosTax>{};
+    final clean = ids.toSet().toList();
+    if (clean.isEmpty) return out;
+    try {
+      final result =
+          await callKw('account.tax', 'search_read', [], kwargs: {
+        'domain': [
+          ['id', 'in', clean]
+        ],
+        'fields': ['id', 'amount', 'price_include'],
+      });
+      for (final e in (result as List)) {
+        final m = (e as Map).cast<String, dynamic>();
+        final id = (m['id'] as num).toInt();
+        out[id] = PosTax(
+          id: id,
+          amount: m['amount'] is num ? (m['amount'] as num).toDouble() : 0,
+          priceInclude: m['price_include'] == true,
+        );
+      }
+    } catch (_) {
+      // Ignore — treated as 0%.
+    }
+    return out;
+  }
+
+  /// Payment methods (cash, card...). Tolerates field differences.
+  Future<List<PosPayMethod>> posPaymentMethods() async {
+    dynamic result;
+    try {
+      try {
+        result = await callKw('pos.payment.method', 'search_read', [],
+            kwargs: {
+              'domain': [
+                ['active', '=', true]
+              ],
+              'fields': ['id', 'name', 'is_cash_count', 'type'],
+              'order': 'name',
+            });
+      } catch (_) {
+        result = await callKw('pos.payment.method', 'search_read', [],
+            kwargs: {
+              'domain': [],
+              'fields': ['id', 'name'],
+              'order': 'name',
+            });
+      }
+    } catch (e) {
+      throw OdooException(_posUnavailable(e));
+    }
+    return (result as List).map((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      final type = (m['type'] ?? '').toString();
+      final cash = m['is_cash_count'] == true || type == 'cash';
+      return PosPayMethod(
+        id: (m['id'] as num).toInt(),
+        name: (m['name'] ?? '').toString(),
+        isCash: cash,
+      );
+    }).toList();
+  }
+
+  /// Full native sale: order + payments + paid. Returns server receipt data.
+  /// Throws with a clear message at the failing step; a draft order left
+  /// behind can always be paid/voided at the register — never silent.
+  Future<PosReceipt> posCheckout({
+    required int sessionId,
+    required List<PosCartLine> lines,
+    required List<PosTender> tenders,
+  }) async {
+    if (lines.isEmpty) throw OdooException('Cart is empty.');
+    final tendered = tenders.fold(0.0, (a, t) => a + t.amount);
+    if (tendered <= 0) throw OdooException('Enter a payment amount.');
+    int orderId;
+    try {
+      orderId = await callKw('pos.order', 'create', [
+        {
+          'pos_session_id': sessionId,
+          'lines': [
+            for (final l in lines)
+              [
+                0,
+                0,
+                {
+                  'product_id': l.productId,
+                  'qty': l.qty,
+                  'price_unit': l.priceUnit,
+                  'discount': 0,
+                  'tax_ids': [
+                    [6, 0, l.taxIds]
+                  ],
+                }
+              ],
+          ],
+        }
+      ]) as int;
+    } catch (e) {
+      throw OdooException('Could not create the sale: ${_short(e)}');
+    }
+    try {
+      for (final t in tenders) {
+        await callKw('pos.payment', 'create', [
+          {
+            'pos_order_id': orderId,
+            'amount': t.amount,
+            'payment_method_id': t.methodId,
+          }
+        ]);
+      }
+    } catch (e) {
+      throw OdooException(
+          'Order #$orderId saved as DRAFT (pay it at the register). Payment failed: ${_short(e)}');
+    }
+    try {
+      await callKw('pos.order', 'action_pos_order_paid', [
+        [orderId]
+      ]);
+    } catch (e) {
+      throw OdooException(
+          'Order #$orderId saved as DRAFT (pay it at the register). Validate failed: ${_short(e)}');
+    }
+    // Server totals are authoritative for the receipt.
+    String ref = '#$orderId';
+    double total = 0;
+    try {
+      final read = await callKw('pos.order', 'read', [
+        [orderId],
+        ['pos_reference', 'amount_total'],
+      ]) as List;
+      if (read.isNotEmpty) {
+        final m = (read.first as Map).cast<String, dynamic>();
+        ref = (m['pos_reference'] ?? ref).toString();
+        if (m['amount_total'] is num) {
+          total = (m['amount_total'] as num).toDouble();
+        }
+      }
+    } catch (_) {}
+    return PosReceipt(
+        orderId: orderId,
+        reference: ref,
+        total: total,
+        tendered: tendered,
+        change: tendered - total);
+  }
+
+  String _posUnavailable(Object e) {
+    final m = e.toString();
+    return 'POS_UNAVAILABLE: $m';
+  }
+
+  String _short(Object e) {
+    final m = e is OdooException ? e.message : e.toString();
+    return m.length > 220 ? '${m.substring(0, 220)}…' : m;
+  }
 }
 
 /// Employee linked to the logged-in Odoo user.
@@ -1052,6 +1312,154 @@ class ScrapHistoryLine {
     required this.state,
     required this.origin,
   });
+}
+
+/// ---- Native POS models (pure cart/tax math lives in PosCart) ----
+
+/// A register (pos.config).
+class PosShop {
+  final int id;
+  final String name;
+  const PosShop({required this.id, required this.name});
+}
+
+/// An open register session (pos.session).
+class PosSession {
+  final int id;
+  final String name;
+  final int configId;
+  final String state;
+  const PosSession(
+      {required this.id,
+      required this.name,
+      required this.configId,
+      required this.state});
+}
+
+/// A sellable product for checkout.
+class PosProduct {
+  final int id;
+  final String name;
+  final String barcode;
+  final double listPrice;
+  final List<int> taxIds;
+  final double onHand;
+  const PosProduct({
+    required this.id,
+    required this.name,
+    required this.barcode,
+    required this.listPrice,
+    this.taxIds = const [],
+    this.onHand = 0,
+  });
+}
+
+/// A sales tax (account.tax) for local total estimates.
+class PosTax {
+  final int id;
+  final double amount; // percent, e.g. 6.625
+  final bool priceInclude;
+  const PosTax(
+      {required this.id, required this.amount, this.priceInclude = true});
+}
+
+/// One line the cashier sends to the server.
+class PosCartLine {
+  final int productId;
+  final double qty;
+  final double priceUnit;
+  final List<int> taxIds;
+  const PosCartLine(
+      {required this.productId,
+      required this.qty,
+      required this.priceUnit,
+      this.taxIds = const []});
+}
+
+/// One tender the cashier sends to the server.
+class PosTender {
+  final int methodId;
+  final double amount;
+  const PosTender({required this.methodId, required this.amount});
+}
+
+/// Payment method (pos.payment.method).
+class PosPayMethod {
+  final int id;
+  final String name;
+  final bool isCash;
+  const PosPayMethod(
+      {required this.id, required this.name, this.isCash = false});
+}
+
+/// Server receipt after a paid sale.
+class PosReceipt {
+  final int orderId;
+  final String reference;
+  final double total;
+  final double tendered;
+  final double change;
+  const PosReceipt(
+      {required this.orderId,
+      required this.reference,
+      required this.total,
+      required this.tendered,
+      required this.change});
+}
+
+/// Pure cart math for the checkout screen. Whitebox-tested: given lines +
+/// tax rates, estimate subtotal / tax / total exactly like the UI shows.
+/// Server totals stay authoritative on the receipt.
+class PosCart {
+  /// Per-line total at register price (before tax extraction).
+  static double lineTotal(double priceUnit, double qty) => priceUnit * qty;
+
+  /// Tax portion of a tax-INCLUDED line total at [ratePct].
+  static double includedTax(double lineTotal, double ratePct) {
+    if (ratePct <= 0) return 0;
+    final r = ratePct / 100.0;
+    return lineTotal - lineTotal / (1 + r);
+  }
+
+  /// Added tax for a tax-EXCLUDED line total at [ratePct].
+  static double excludedTax(double lineTotal, double ratePct) =>
+      ratePct <= 0 ? 0 : lineTotal * ratePct / 100.0;
+
+  /// Combined rate for a product from its taxes (unknown ids count 0%).
+  /// If ANY tax is price-included, the register price counts as included.
+  static ({double rate, bool included}) combineRate(
+      List<int> taxIds, Map<int, PosTax> taxes) {
+    var rate = 0.0;
+    var included = false;
+    for (final id in taxIds) {
+      final t = taxes[id];
+      if (t == null) continue;
+      rate += t.amount;
+      if (t.priceInclude) included = true;
+    }
+    return (rate: rate, included: included);
+  }
+
+  /// Cart totals from lines + tax table.
+  static ({double subtotal, double tax, double total}) totals(
+      List<({double price, double qty, List<int> taxIds})> lines,
+      Map<int, PosTax> taxes) {
+    var subtotal = 0.0;
+    var tax = 0.0;
+    for (final l in lines) {
+      final lt = lineTotal(l.price, l.qty);
+      subtotal += lt;
+      final c = combineRate(l.taxIds, taxes);
+      tax += c.included ? includedTax(lt, c.rate) : excludedTax(lt, c.rate);
+    }
+    final total = subtotal +
+        lines.fold(0.0, (a, l) {
+          final lt = lineTotal(l.price, l.qty);
+          final c = combineRate(l.taxIds, taxes);
+          return a + (c.included ? 0 : excludedTax(lt, c.rate));
+        });
+    return (subtotal: subtotal, tax: tax, total: total);
+  }
 }
 
 extension ScrapHistory on OdooClient {
