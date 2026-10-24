@@ -157,12 +157,12 @@ void main() {
       final params = body['params'] as Map<String, dynamic>;
       final key = "${params['model']}/${params['method']}";
       calls.add(key);
-      if (key == 'pos.order/create_from_ui') {
+      if (key == 'pos.order/sync_from_ui') {
         uiBody = req.body;
         return http.Response(
             jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': [101]}), 200);
       }
-      if (key == 'pos.order/read') {
+      if (key == 'pos.order/search_read') {
         return http.Response(
             jsonEncode({
               'jsonrpc': '2.0',
@@ -190,7 +190,7 @@ void main() {
       tenders: const [PosTender(methodId: 2, amount: 10.0)],
       amountTax: 0,
     );
-    expect(calls, contains('pos.order/create_from_ui'));
+    expect(calls, contains('pos.order/sync_from_ui'));
     expect(calls, isNot(contains('pos.order/create')));
     // Regression (Pixel 2026-10-24): amount_tax must travel in the dict,
     // with the frontend's payment key and uuids.
@@ -211,11 +211,11 @@ void main() {
       final params = body['params'] as Map<String, dynamic>;
       final key = "${params['model']}/${params['method']}";
       calls.add(key);
-      if (key == 'pos.order/create_from_ui') {
+      if (key == 'pos.order/sync_from_ui') {
         return http.Response(
             jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': [101]}), 200);
       }
-      if (key == 'pos.order/read') {
+      if (key == 'pos.order/search_read') {
         return http.Response(
             jsonEncode({
               'jsonrpc': '2.0',
@@ -250,7 +250,7 @@ void main() {
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       final params = body['params'] as Map<String, dynamic>;
       if ("${params['model']}/${params['method']}" ==
-          'pos.order/create_from_ui') {
+          'pos.order/sync_from_ui') {
         return http.Response(
             jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
       }
@@ -304,7 +304,7 @@ void main() {
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       final params = body['params'] as Map<String, dynamic>;
       final key = "${params['model']}/${params['method']}";
-      if (key == 'pos.order/create_from_ui') {
+      if (key == 'pos.order/sync_from_ui') {
         return http.Response(
             jsonEncode({
               'jsonrpc': '2.0',
@@ -338,18 +338,18 @@ void main() {
     }
   });
 
-  test('integration: draft flag travels to create_from_ui', () async {
-    dynamic draftFlag;
+  test('integration: draft intent travels as order state', () async {
+    String uiBody = '';
     final mock = MockClient((req) async {
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       final params = body['params'] as Map<String, dynamic>;
       if ("${params['model']}/${params['method']}" ==
-          'pos.order/create_from_ui') {
-        draftFlag = (params['args'] as List)[1];
+          'pos.order/sync_from_ui') {
+        uiBody = req.body;
         return http.Response(
-            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': [101]}), 200);
+            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': {}}), 200);
       }
-      if ("${params['model']}/${params['method']}" == 'pos.order/read') {
+      if ("${params['model']}/${params['method']}" == 'pos.order/search_read') {
         return http.Response(
             jsonEncode({
               'jsonrpc': '2.0',
@@ -376,7 +376,7 @@ void main() {
       amountTax: 0,
       draft: true,
     );
-    expect(draftFlag, isTrue);
+    expect(uiBody, contains('"state":"draft"'));
   });
 
   test('integration: probe lists helcim models + terminal methods', () async {

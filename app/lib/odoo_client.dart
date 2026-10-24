@@ -1145,12 +1145,13 @@ class OdooClient {
   }
 
   /// Full native sale via the frontend's own sync endpoint
-  /// (`pos.order/create_from_ui`) — the path web POS uses daily, so custom
-  /// required fields (e.g. amount_tax) are satisfied exactly like prod.
-  /// Returns server receipt data. Single call, never retried internally:
-  /// a retry with a new uuid would double-charge.
-  /// Throws with a clear message at the failing step; a draft order left
-  /// behind can always be paid/voided at the register — never silent.
+  /// (`pos.order/sync_from_ui` on Odoo 18 — `create_from_ui` is gone).
+  /// Same UI-shaped dict web POS syncs daily, so custom required fields
+  /// (e.g. a required `amount_tax`) are satisfied like prod. The order is
+  /// found afterwards by its uuid (sync answers with display data, not
+  /// ids). Single call per attempt; a retry uses a fresh uuid so it can
+  /// never double-charge. Throws with a clear message at the failing step;
+  /// a draft order left behind can always be paid/voided at the register.
   Future<PosReceipt> posCheckout({
     required int sessionId,
     required List<PosCartLine> lines,
@@ -1181,6 +1182,7 @@ class OdooClient {
       'session_id': sessionId,
       'partner_id': false,
       'to_invoice': false,
+      'state': draft ? 'draft' : 'paid',
       'amount_total': _round2(total),
       'amount_tax': _round2(tax),
       'amount_paid': _round2(tendered),
@@ -1220,39 +1222,42 @@ class OdooClient {
           ],
       ],
     };
-    dynamic result;
     try {
-      result = await callKw(
-          'pos.order', 'create_from_ui', [
+      // Odoo 18: sync_from_ui([orders]) — no draft arg (per-order 'state'
+      // key instead). Answers with display data, not ids.
+      await callKw('pos.order', 'sync_from_ui', [
         [orderDict],
-        draft,
       ]);
     } catch (e) {
       throw OdooException('Could not create the sale: ${_full(e)}');
     }
-    final orderId = _asOrderId(result);
-    if (orderId == null) {
-      throw OdooException(
-          'Sale not confirmed by server (response: ${_short(result)}). Check the register before retrying — do NOT rescan to avoid a duplicate.');
-    }
-    // create_from_ui already pays non-draft orders; verify and read back.
-    String ref = '#$orderId';
+    // Find our order by its unique uuid (server dedupes on it — exact).
+    int? orderId;
+    String ref = '';
     double serverTotal = total;
     String state = '';
     try {
-      final read = await callKw('pos.order', 'read', [
-        [orderId],
-        ['pos_reference', 'amount_total', 'state'],
-      ]) as List;
-      if (read.isNotEmpty) {
-        final m = (read.first as Map).cast<String, dynamic>();
-        ref = (m['pos_reference'] ?? ref).toString();
+      final found = await callKw('pos.order', 'search_read', [], kwargs: {
+        'domain': [
+          ['uuid', '=', uuid]
+        ],
+        'fields': ['id', 'pos_reference', 'amount_total', 'state', 'name'],
+        'limit': 1,
+      }) as List;
+      if (found.isNotEmpty) {
+        final m = (found.first as Map).cast<String, dynamic>();
+        orderId = (m['id'] as num).toInt();
+        ref = (m['pos_reference'] ?? m['name'] ?? '#$orderId').toString();
         if (m['amount_total'] is num) {
           serverTotal = (m['amount_total'] as num).toDouble();
         }
         state = (m['state'] ?? '').toString();
       }
     } catch (_) {}
+    if (orderId == null) {
+      throw OdooException(
+          'Sale not confirmed on server (order missing after sync). Check the register before retrying — do NOT rescan to avoid a duplicate.');
+    }
     if (!draft && state.isNotEmpty && state != 'paid') {
       try {
         await callKw('pos.order', 'action_pos_order_paid', [
@@ -1359,19 +1364,6 @@ class OdooClient {
     final r = DateTime.now().microsecondsSinceEpoch;
     final h = r.toRadixString(16).padLeft(12, '0');
     return '${h.substring(0, 8)}-${h.substring(8, 12)}-4${(r % 4096).toRadixString(16).padLeft(3, '0')}-8${(r % 4096).toRadixString(16).padLeft(3, '0')}-${h.padLeft(12, '0')}';
-  }
-
-  /// create_from_ui returns [ids] (or a single id). Anything else is
-  /// treated as unconfirmed — never guess an order id.
-  int? _asOrderId(dynamic result) {
-    if (result is int) return result;
-    if (result is List && result.isNotEmpty && result.first is num) {
-      return (result.first as num).toInt();
-    }
-    if (result is Map && result['id'] is num) {
-      return (result['id'] as num).toInt();
-    }
-    return null;
   }
 
   String _short(Object e) {

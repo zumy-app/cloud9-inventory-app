@@ -219,7 +219,38 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
     final terminal = _selectedMethod?.terminal ?? '';
     final helcimReady =
         terminal.isNotEmpty && HelcimStore.instance.isConfigured;
-    if (helcimReady) {
+    if (terminal.isNotEmpty && !helcimReady) {
+      // Terminal method but no push configured: offer setup or
+      // record-after-charge explicitly — never a bare "already charged".
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text(t('pos_term_title')),
+          content: Text(Lang.instance.f('pos_term_body', {
+            'terminal': terminal,
+            'total': total.toStringAsFixed(2),
+          })),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, 'cancel'),
+                child: Text(t('waste_cancel'))),
+            TextButton(
+                onPressed: () => Navigator.pop(c, 'setup'),
+                child: Text(t('pos_term_setup'))),
+            FilledButton(
+                onPressed: () => Navigator.pop(c, 'record'),
+                child: Text(t('pos_term_record'))),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (choice == 'setup') {
+        await _helcimSetup();
+        return;
+      }
+      if (choice != 'record') return;
+      // ...falls through to the record-after-charge confirm below.
+    } else if (helcimReady) {
       // Auto-push: total goes to the physical terminal first; the Odoo
       // payment is only recorded after the customer approves there.
       await _pushThenRecord(s, mid, total, tendered, terminal);
