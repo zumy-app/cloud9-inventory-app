@@ -1097,6 +1097,7 @@ class OdooClient {
   /// Payment methods (cash, card...). Tolerates field differences.
   /// `terminal` names the integrated terminal (e.g. helcim/stripe/adyen)
   /// or '' when the method records payment directly.
+  /// `journal` is the booking journal ('' when none — sync will fail).
   Future<List<PosPayMethod>> posPaymentMethods() async {
     dynamic result;
     try {
@@ -1111,7 +1112,9 @@ class OdooClient {
                 'name',
                 'is_cash_count',
                 'type',
-                'use_payment_terminal'
+                'use_payment_terminal',
+                'journal_id',
+                'payment_method_type'
               ],
               'order': 'name',
             });
@@ -1135,13 +1138,43 @@ class OdooClient {
           (term == null || term is bool || term == 'none' || term == false)
               ? ''
               : term.toString();
+      final jr = m['journal_id'];
+      final journal = jr is List && jr.length > 1
+          ? jr[1].toString()
+          : (jr is num ? '#$jr' : '');
       return PosPayMethod(
         id: (m['id'] as num).toInt(),
         name: (m['name'] ?? '').toString(),
         isCash: cash,
         terminal: terminal,
+        journal: journal,
+        integration: (m['payment_method_type'] ?? '').toString(),
       );
     }).toList();
+  }
+
+  /// Payment method ids allowed on a register (pos.order lines reject the
+  /// rest — Odoo constraint, not app logic). Empty = could not read.
+  Future<Set<int>> posConfigMethodIds(int configId) async {
+    try {
+      final result =
+          await callKw('pos.config', 'search_read', [], kwargs: {
+        'domain': [
+          ['id', '=', configId]
+        ],
+        'fields': ['payment_method_ids'],
+        'limit': 1,
+      }) as List;
+      if (result.isEmpty) return {};
+      final m = (result.first as Map).cast<String, dynamic>();
+      final ids = m['payment_method_ids'];
+      if (ids is List) {
+        return ids.map((e) => (e as num).toInt()).toSet();
+      }
+      return {};
+    } catch (_) {
+      return {};
+    }
   }
 
   /// Full native sale via the frontend's own sync endpoint
@@ -1333,16 +1366,19 @@ class OdooClient {
     } catch (e) {
       notes.add('ir.model unreadable: ${_short(e)}');
     }
-    // 2. Payment methods with a terminal integration configured.
+    // 2. All payment methods: terminal flag + booking journal.
+    // Missing journal or a method absent from the register config are the
+    // two reasons a terminal payment fails while cash succeeds.
     final terminals = <String>[];
     try {
       final methods = await posPaymentMethods();
       for (final pm in methods) {
-        if (pm.isTerminal) terminals.add('${pm.name} [${pm.terminal}]');
+        final kind = pm.isTerminal ? '[${pm.terminal}]' : '[direct]';
+        final jr = pm.journal.isEmpty ? 'NO-JOURNAL' : pm.journal;
+        terminals.add('${pm.name} $kind journal=$jr');
       }
       if (terminals.isEmpty) {
-        notes.add(
-            'No payment method has a terminal integration (use_payment_terminal empty).');
+        notes.add('No payment methods found at all.');
       }
     } catch (e) {
       notes.add('payment methods unreadable: ${_short(e)}');
@@ -1583,11 +1619,19 @@ class PosPayMethod {
 
   /// Integrated terminal (e.g. 'helcim') or '' for direct methods.
   final String terminal;
+
+  /// Booking journal name ('' when none — Odoo will reject the payment).
+  final String journal;
+
+  /// Integration kind: 'none' | 'terminal' | 'qr_code' ('' if unreadable).
+  final String integration;
   const PosPayMethod(
       {required this.id,
       required this.name,
       this.isCash = false,
-      this.terminal = ''});
+      this.terminal = '',
+      this.journal = '',
+      this.integration = ''});
 
   bool get isTerminal => terminal.isNotEmpty;
 }

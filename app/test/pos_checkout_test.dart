@@ -278,12 +278,25 @@ void main() {
             'jsonrpc': '2.0',
             'id': 1,
             'result': [
-              {'id': 2, 'name': 'Cash', 'type': 'cash'},
+              {
+                'id': 2,
+                'name': 'Cash',
+                'type': 'cash',
+                'journal_id': [10, 'Cash']
+              },
               {
                 'id': 4,
                 'name': 'Helcim',
                 'type': 'bank',
-                'use_payment_terminal': 'helcim'
+                'use_payment_terminal': 'helcim',
+                'journal_id': [11, 'Bank'],
+                'payment_method_type': 'terminal'
+              },
+              {
+                'id': 5,
+                'name': 'Broken',
+                'type': 'bank',
+                'journal_id': false
               }
             ]
           }),
@@ -293,9 +306,29 @@ void main() {
     final methods = await c.posPaymentMethods();
     final cash = methods.firstWhere((m) => m.id == 2);
     final helcim = methods.firstWhere((m) => m.id == 4);
+    final broken = methods.firstWhere((m) => m.id == 5);
     expect(cash.isTerminal, isFalse);
     expect(helcim.isTerminal, isTrue);
     expect(helcim.terminal, 'helcim');
+    expect(helcim.journal, 'Bank');
+    expect(helcim.integration, 'terminal');
+    expect(broken.journal, isEmpty);
+  });
+
+  test('integration: register method allow-list parses', () async {
+    final mock = MockClient((req) async {
+      return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': [
+              {'id': 1, 'payment_method_ids': [2, 4]}
+            ]
+          }),
+          200);
+    });
+    final c = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    expect(await c.posConfigMethodIds(1), {2, 4});
   });
 
   test('integration: server field error surfaces in full (amount_tax case)',
@@ -417,7 +450,8 @@ void main() {
                   'id': 4,
                   'name': 'Helcim',
                   'type': 'bank',
-                  'use_payment_terminal': 'helcim'
+                  'use_payment_terminal': 'helcim',
+                  'journal_id': [11, 'Bank']
                 }
               ]
             }),
@@ -431,7 +465,10 @@ void main() {
     expect(probe.models.length, 1);
     expect(probe.models.first.model, 'pos.helcim.terminal');
     expect(probe.models.first.fields, contains('device_code(char *req)'));
-    expect(probe.terminalMethods, contains('Helcim [helcim]'));
+    expect(
+        probe.terminalMethods,
+        contains(
+            'Helcim [helcim] journal=Bank'));
     final report = probe.report();
     expect(report, contains('pos.helcim.terminal'));
     expect(report, contains('Helcim [helcim]'));

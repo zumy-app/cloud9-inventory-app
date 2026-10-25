@@ -39,6 +39,7 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
   int? _shopId;
   PosSession? _session;
   bool _sessionLoading = true;
+  Set<int> _allowedMethodIds = {};
   List<PosProduct> _results = [];
   bool _searching = false;
   final List<_CartItem> _cart = [];
@@ -112,7 +113,16 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
     setState(() => _sessionLoading = true);
     try {
       final s = await widget.client.openPosSession(sid);
-      if (mounted) setState(() => _session = s);
+      Set<int> allowed = {};
+      try {
+        allowed = await widget.client.posConfigMethodIds(sid);
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _session = s;
+          _allowedMethodIds = allowed;
+        });
+      }
     } on OdooException catch (e) {
       if (mounted) setState(() => _err = _friendly(e.message));
     } finally {
@@ -215,6 +225,25 @@ class _PosCheckoutScreenState extends State<PosCheckoutScreen> {
     if (tendered < total - 0.005) {
       setState(() => _err = t('pos_err_short'));
       return;
+    }
+    // Odoo rejects payments whose method is not on THIS register
+    // (pos.payment constraint) or that have no booking journal.
+    // Catch both here with a fix-it message instead of a cryptic sync fail.
+    final method = _selectedMethod;
+    if (method != null) {
+      if (_allowedMethodIds.isNotEmpty &&
+          !_allowedMethodIds.contains(method.id)) {
+        setState(() => _err = Lang.instance.f('pos_err_notinregister', {
+              'method': method.name,
+            }));
+        return;
+      }
+      if (method.journal.isEmpty) {
+        setState(() => _err = Lang.instance.f('pos_err_nojournal', {
+              'method': method.name,
+            }));
+        return;
+      }
     }
     final terminal = _selectedMethod?.terminal ?? '';
     final helcimReady =
