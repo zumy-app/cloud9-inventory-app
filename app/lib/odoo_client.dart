@@ -761,22 +761,49 @@ class OdooClient {
   /// Create + validate a scrap move for a waste/loss line.
   /// Returns the scrap id and the frozen unit value Odoo applied.
   /// Throws OdooException on failure (caller keeps an offline draft).
+  ///
+  /// DB-backed waste log (no custom Odoo module): the rich waste metadata
+  /// is encoded into the standard `stock.scrap` `origin` char field via
+  /// [buildWasteOrigin] (reason, disposition, staff, barcode, expiry, note,
+  /// …). Odoo itself tracks WHO logged it via `create_uid`/`create_date`,
+  /// so every device sees the same rows + the logging user.
   Future<ScrapResult> createScrap({
     required InventoryProduct product,
     required double qty,
     int? lotId,
     String origin = '',
+    String reasonKey = '',
+    String dispositionKey = '',
+    String loggedBy = '',
+    String packageExpiry = '',
+    String note = '',
+    String supplierInvoice = '',
+    double retailEach = 0,
   }) async {
     final q = qty;
     if (q <= 0) throw OdooException('Scrap qty must be > 0');
     final srcId = await _stockLocationId();
     final dstId = await scrapLocationId();
+    var originText = origin.trim();
+    if (reasonKey.trim().isNotEmpty || dispositionKey.trim().isNotEmpty) {
+      originText = buildWasteOrigin(
+        reasonKey: reasonKey,
+        dispositionKey: dispositionKey,
+        loggedBy: loggedBy,
+        barcode: product.barcode,
+        sku: product.defaultCode,
+        packageExpiry: packageExpiry,
+        note: note,
+        supplierInvoice: supplierInvoice,
+        retailEach: retailEach,
+      );
+    }
     final vals = <String, dynamic>{
       'product_id': product.variantId,
       'scrap_qty': q,
       'location_id': srcId,
       'scrap_location_id': dstId,
-      if (origin.trim().isNotEmpty) 'origin': origin.trim(),
+      if (originText.isNotEmpty) 'origin': originText,
     };
     if (lotId != null) vals['lot_id'] = lotId;
     int scrapRecordId;
@@ -1525,6 +1552,12 @@ class ScrapResult {
 }
 
 /// Read-only server scrap line for the history/report view.
+///
+/// DB-backed waste log shared by all devices/users (standard `stock.scrap`,
+/// no custom module). Rich waste metadata (reason, disposition, note, …)
+/// is decoded from `origin` via [parseWasteOrigin]; WHO logged it comes
+/// from Odoo's own `create_uid`/`create_date` (authoritative) with the
+/// app-reported `by=` value as fallback.
 class ScrapHistoryLine {
   final int id;
   final String productName;
@@ -1532,6 +1565,21 @@ class ScrapHistoryLine {
   final String dateDone;
   final String state;
   final String origin;
+  final String originRaw;
+  final String reasonKey;
+  final String reasonLabel;
+  final String dispositionKey;
+  final String dispositionLabel;
+  final String loggedBy; // app-reported `by=` from origin
+  final int createUid; // Odoo author (0 when unreadable)
+  final String createUidName; // Odoo author display name
+  final String createDate; // Odoo create_date UTC string
+  final String packageExpiry;
+  final String note;
+  final String supplierInvoice;
+  final double retailEach;
+  final double unitValue;
+  double get totalValue => qty * unitValue;
   const ScrapHistoryLine({
     required this.id,
     required this.productName,
@@ -1539,7 +1587,235 @@ class ScrapHistoryLine {
     required this.dateDone,
     required this.state,
     required this.origin,
+    this.originRaw = '',
+    this.reasonKey = '',
+    this.reasonLabel = '',
+    this.dispositionKey = '',
+    this.dispositionLabel = '',
+    this.loggedBy = '',
+    this.createUid = 0,
+    this.createUidName = '',
+    this.createDate = '',
+    this.packageExpiry = '',
+    this.note = '',
+    this.supplierInvoice = '',
+    this.retailEach = 0,
+    this.unitValue = 0,
   });
+
+  /// Best display name for "who logged it": Odoo author first, then the
+  /// app-reported login, else '—'.
+  String get loggedByDisplay =>
+      createUidName.isNotEmpty ? createUidName : loggedBy;
+}
+
+/// Totals over a set of server scrap lines (browse/filter view).
+class ScrapTotals {
+  final int count;
+  final double qty;
+  final double value;
+  const ScrapTotals({this.count = 0, this.qty = 0, this.value = 0});
+
+  static ScrapTotals of(Iterable<ScrapHistoryLine> rows) {
+    var c = 0;
+    var q = 0.0;
+    var v = 0.0;
+    for (final r in rows) {
+      c++;
+      q += r.qty;
+      v += r.totalValue;
+    }
+    return ScrapTotals(count: c, qty: q, value: v);
+  }
+}
+
+/// Structured `origin` encoding for waste scraps (standard char field, no
+/// custom Odoo module). Format v2:
+/// `WASTE|reason=expired|disp=trashed|by=clerk|code=BC1|sku=M1|expiry=…|sup=…|retail=…|note=…`
+/// Legacy v1 (`WASTE:<Reason label>/<Disposition label>`) still parses.
+String buildWasteOrigin({
+  required String reasonKey,
+  required String dispositionKey,
+  String loggedBy = '',
+  String barcode = '',
+  String sku = '',
+  String packageExpiry = '',
+  String note = '',
+  String supplierInvoice = '',
+  double retailEach = 0,
+}) {
+  String clean(String s, [int max = 120]) {
+    var v = s.replaceAll('|', '/').replaceAll('\n', ' ').trim();
+    if (v.length > max) v = v.substring(0, max);
+    return v;
+  }
+
+  final parts = <String>['WASTE'];
+  if (reasonKey.trim().isNotEmpty) parts.add('reason=${clean(reasonKey, 24)}');
+  if (dispositionKey.trim().isNotEmpty) {
+    parts.add('disp=${clean(dispositionKey, 24)}');
+  }
+  if (loggedBy.trim().isNotEmpty) parts.add('by=${clean(loggedBy, 60)}');
+  if (barcode.trim().isNotEmpty) parts.add('code=${clean(barcode, 60)}');
+  if (sku.trim().isNotEmpty) parts.add('sku=${clean(sku, 60)}');
+  if (packageExpiry.trim().isNotEmpty) {
+    parts.add('expiry=${clean(packageExpiry, 24)}');
+  }
+  if (supplierInvoice.trim().isNotEmpty) {
+    parts.add('sup=${clean(supplierInvoice, 80)}');
+  }
+  if (retailEach > 0) parts.add('retail=${retailEach.toStringAsFixed(2)}');
+  if (note.trim().isNotEmpty) parts.add('note=${clean(note, 180)}');
+  return parts.join('|');
+}
+
+/// Decode a scrap `origin` into waste metadata. Never throws; unknown or
+/// empty origins yield empty keys with the raw text preserved.
+({
+  String reasonKey,
+  String reasonLabel,
+  String dispositionKey,
+  String dispositionLabel,
+  String loggedBy,
+  String barcode,
+  String sku,
+  String packageExpiry,
+  String note,
+  String supplierInvoice,
+  double retailEach,
+}) parseWasteOrigin(String origin) {
+  var reasonKey = '';
+  var dispositionKey = '';
+  var loggedBy = '';
+  var barcode = '';
+  var sku = '';
+  var expiry = '';
+  var note = '';
+  var supplier = '';
+  var retail = 0.0;
+  final raw = origin.trim();
+  if (raw.startsWith('WASTE|')) {
+    for (final seg in raw.substring('WASTE|'.length).split('|')) {
+      final eq = seg.indexOf('=');
+      if (eq <= 0) continue;
+      final k = seg.substring(0, eq).trim();
+      final v = seg.substring(eq + 1).trim();
+      switch (k) {
+        case 'reason':
+          reasonKey = v;
+          break;
+        case 'disp':
+          dispositionKey = v;
+          break;
+        case 'by':
+          loggedBy = v;
+          break;
+        case 'code':
+          barcode = v;
+          break;
+        case 'sku':
+          sku = v;
+          break;
+        case 'expiry':
+          expiry = v;
+          break;
+        case 'note':
+          note = v;
+          break;
+        case 'sup':
+          supplier = v;
+          break;
+        case 'retail':
+          retail = double.tryParse(v) ?? 0;
+          break;
+      }
+    }
+  } else if (raw.startsWith('WASTE:')) {
+    // Legacy v1: 'WASTE:<Reason label>/<Disposition label>'.
+    final rest = raw.substring('WASTE:'.length);
+    final slash = rest.indexOf('/');
+    final rLabel = (slash < 0 ? rest : rest.substring(0, slash)).trim();
+    final dLabel = slash < 0 ? '' : rest.substring(slash + 1).trim();
+    reasonKey = _reasonKeyFromLabel(rLabel);
+    dispositionKey = _dispositionKeyFromLabel(dLabel);
+    return (
+      reasonKey: reasonKey,
+      reasonLabel: rLabel,
+      dispositionKey: dispositionKey,
+      dispositionLabel: dLabel,
+      loggedBy: loggedBy,
+      barcode: barcode,
+      sku: sku,
+      packageExpiry: expiry,
+      note: note,
+      supplierInvoice: supplier,
+      retailEach: retail,
+    );
+  } else if (raw.isNotEmpty) {
+    // Not a waste scrap (manual Odoo scrap) — keep raw, no keys.
+    return (
+      reasonKey: '',
+      reasonLabel: '',
+      dispositionKey: '',
+      dispositionLabel: '',
+      loggedBy: '',
+      barcode: '',
+      sku: '',
+      packageExpiry: '',
+      note: '',
+      supplierInvoice: '',
+      retailEach: 0.0,
+    );
+  }
+  return (
+    reasonKey: reasonKey,
+    reasonLabel: _reasonLabelFromKey(reasonKey),
+    dispositionKey: dispositionKey,
+    dispositionLabel: _dispositionLabelFromKey(dispositionKey),
+    loggedBy: loggedBy,
+    barcode: barcode,
+    sku: sku,
+    packageExpiry: expiry,
+    note: note,
+    supplierInvoice: supplier,
+    retailEach: retail,
+  );
+}
+
+String _reasonLabelFromKey(String key) => switch (key) {
+      'expired' => 'Expired on shelf',
+      'damaged' => 'Damaged / broken',
+      'spoiled' => 'Spoiled / sour',
+      'recall' => 'Recall',
+      _ => key,
+    };
+
+String _dispositionLabelFromKey(String key) => switch (key) {
+      'trashed' => 'Trashed / destroyed',
+      'donated' => 'Donated',
+      'vendorCreditPending' => 'Vendor credit pending',
+      'vendorCredited' => 'Vendor credit received',
+      _ => key,
+    };
+
+String _reasonKeyFromLabel(String label) {
+  final l = label.toLowerCase();
+  if (l.contains('expir')) return 'expired';
+  if (l.contains('damag') || l.contains('broken')) return 'damaged';
+  if (l.contains('spoil') || l.contains('sour')) return 'spoiled';
+  if (l.contains('recall')) return 'recall';
+  return '';
+}
+
+String _dispositionKeyFromLabel(String label) {
+  final l = label.toLowerCase();
+  if (l.contains('donat')) return 'donated';
+  if (l.contains('credit') && l.contains('receiv')) return 'vendorCredited';
+  if (l.contains('credit') || l.contains('pending')) {
+    return 'vendorCreditPending';
+  }
+  if (l.contains('trash') || l.contains('destroy')) return 'trashed';
+  return '';
 }
 
 /// ---- Native POS models (pure cart/tax math lives in PosCart) ----
@@ -1707,31 +1983,116 @@ class PosCart {
 }
 
 extension ScrapHistory on OdooClient {
-  /// Recent scraps across all products/devices (server truth).
-  /// Used to back the Waste history when the local log is empty
-  /// (reinstall, second device) or to cross-check it.
-  Future<List<ScrapHistoryLine>> fetchScrapHistory({int limit = 100}) async {
-    final result = await callKw('stock.scrap', 'search_read', [], kwargs: {
-      'domain': [],
-      'fields': ['id', 'product_id', 'scrap_qty', 'state', 'date_done', 'origin'],
-      'limit': limit,
-      'order': 'id desc',
-    });
+  /// Scraps across all products/devices/users (server truth — shared DB).
+  ///
+  /// This is the shared waste log every user sees: standard `stock.scrap`
+  /// rows with `create_uid` (who logged it), `value` (frozen cost), and the
+  /// structured waste `origin` (reason, disposition, note, …).
+  /// [query] matches product name or origin server-side when possible;
+  /// remaining filtering (reason, user, dates) happens client-side in the
+  /// Waste history browser. Tolerates missing fields (old mocks / rights).
+  Future<List<ScrapHistoryLine>> fetchScrapHistory({
+    int limit = 100,
+    int offset = 0,
+    String query = '',
+  }) async {
+    final q = query.trim();
+    final domain = <dynamic>[];
+    if (q.isNotEmpty) {
+      // Server-side pre-filter (best-effort): product name or origin.
+      // If this domain shape is rejected by an older Odoo, the caller
+      // still gets rows because we fall back to an unfiltered fetch.
+      domain.addAll([
+        '|',
+        ['origin', 'ilike', q],
+        ['product_id.name', 'ilike', q],
+      ]);
+    }
+    dynamic result;
+    try {
+      result = await callKw('stock.scrap', 'search_read', [], kwargs: {
+        'domain': domain,
+        'fields': [
+          'id',
+          'product_id',
+          'scrap_qty',
+          'state',
+          'date_done',
+          'origin',
+          'value',
+          'create_uid',
+          'create_date',
+        ],
+        'limit': limit,
+        'offset': offset,
+        'order': 'id desc',
+      });
+    } catch (_) {
+      // Older Odoo may reject product_id.name in domain — retry unfiltered.
+      if (domain.isEmpty) rethrow;
+      result = await callKw('stock.scrap', 'search_read', [], kwargs: {
+        'domain': [],
+        'fields': [
+          'id',
+          'product_id',
+          'scrap_qty',
+          'state',
+          'date_done',
+          'origin',
+          'value',
+          'create_uid',
+          'create_date',
+        ],
+        'limit': limit,
+        'offset': offset,
+        'order': 'id desc',
+      });
+    }
     return (result as List).map((e) {
       final m = (e as Map).cast<String, dynamic>();
       final prod = m['product_id'];
       final name = prod is List && prod.length > 1
           ? prod[1].toString()
-          : prod.toString();
-      final q = m['scrap_qty'];
+          : (prod ?? '').toString();
+      final qty = m['scrap_qty'];
       final dd = m['date_done'];
+      final origin = (m['origin'] ?? '').toString();
+      final meta = parseWasteOrigin(origin);
+      final val = m['value'];
+      final qv = qty is num ? qty.toDouble() : 0.0;
+      var unit = 0.0;
+      if (val is num && qv != 0) unit = (val / qv).toDouble();
+      var createUid = 0;
+      var createUidName = '';
+      final cu = m['create_uid'];
+      if (cu is List && cu.isNotEmpty) {
+        if (cu[0] is num) createUid = (cu[0] as num).toInt();
+        if (cu.length > 1) createUidName = cu[1].toString();
+      } else if (cu is num) {
+        createUid = cu.toInt();
+      }
+      final cd = m['create_date'];
       return ScrapHistoryLine(
         id: (m['id'] as num).toInt(),
         productName: name,
-        qty: q is num ? q.toDouble() : 0,
+        qty: qv,
         dateDone: (dd == null || dd is bool) ? '' : dd.toString(),
         state: (m['state'] ?? '').toString(),
-        origin: (m['origin'] ?? '').toString(),
+        origin: origin,
+        originRaw: origin,
+        reasonKey: meta.reasonKey,
+        reasonLabel: meta.reasonLabel,
+        dispositionKey: meta.dispositionKey,
+        dispositionLabel: meta.dispositionLabel,
+        loggedBy: meta.loggedBy,
+        createUid: createUid,
+        createUidName: createUidName,
+        createDate: (cd == null || cd is bool) ? '' : cd.toString(),
+        packageExpiry: meta.packageExpiry,
+        note: meta.note,
+        supplierInvoice: meta.supplierInvoice,
+        retailEach: meta.retailEach,
+        unitValue: unit,
       );
     }).toList();
   }

@@ -35,6 +35,27 @@ String wasteDispositionLabel(WasteDisposition d) => switch (d) {
       WasteDisposition.vendorCredited => 'Vendor credit received',
     };
 
+/// Stable DB keys for the shared Odoo `origin` encoding (see
+/// OdooClient.buildWasteOrigin). Labels stay human-facing; keys are what
+/// the server browser filters on so renames never break history.
+String wasteReasonKey(WasteReason r) => r.name;
+
+String wasteDispositionKey(WasteDisposition d) => d.name;
+
+WasteReason wasteReasonFromKey(String key) {
+  for (final r in WasteReason.values) {
+    if (r.name == key) return r;
+  }
+  return WasteReason.expired;
+}
+
+WasteDisposition wasteDispositionFromKey(String key) {
+  for (final d in WasteDisposition.values) {
+    if (d.name == key) return d;
+  }
+  return WasteDisposition.trashed;
+}
+
 class WasteLine {
   final String id;
   final int variantId;

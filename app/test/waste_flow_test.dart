@@ -429,4 +429,148 @@ void main() {
     expect(csv, contains('7.50')); // frozen 3 × 2.50, not stale zero
     expect(store.netDeductible, closeTo(7.5, 0.001));
   });
+
+  // ---- Shared DB log: origin encoding + per-user attribution ----
+  test('whitebox: buildWasteOrigin/parseWasteOrigin roundtrip', () {
+    final origin = buildWasteOrigin(
+      reasonKey: 'expired',
+      dispositionKey: 'trashed',
+      loggedBy: 'clerk',
+      barcode: 'BC1',
+      sku: 'M1',
+      packageExpiry: '2026-01-01',
+      note: 'shelf check',
+      supplierInvoice: 'INV1',
+      retailEach: 4.99,
+    );
+    expect(origin.startsWith('WASTE|'), isTrue);
+    expect(origin, contains('reason=expired'));
+    expect(origin, contains('by=clerk'));
+    final meta = parseWasteOrigin(origin);
+    expect(meta.reasonKey, 'expired');
+    expect(meta.reasonLabel, 'Expired on shelf');
+    expect(meta.dispositionKey, 'trashed');
+    expect(meta.loggedBy, 'clerk');
+    expect(meta.barcode, 'BC1');
+    expect(meta.packageExpiry, '2026-01-01');
+    expect(meta.note, 'shelf check');
+    expect(meta.retailEach, closeTo(4.99, 0.001));
+  });
+
+  test('whitebox: legacy WASTE: labels still parse', () {
+    final meta = parseWasteOrigin('WASTE:Expired on shelf/Trashed / destroyed');
+    expect(meta.reasonKey, 'expired');
+    expect(meta.dispositionKey, 'trashed');
+  });
+
+  test('integration: createScrap sends structured origin with user', () async {
+    String? sentOrigin;
+    final mock = MockClient((req) async {
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      final params = body['params'] as Map<String, dynamic>;
+      final model = params['model'];
+      final method = params['method'];
+      if (model == 'stock.location') {
+        return http.Response(
+            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': [
+              {'id': 8}
+            ]}),
+            200);
+      }
+      if (model == 'stock.scrap' && method == 'create') {
+        final args = params['args'] as List;
+        sentOrigin = ((args.first as Map)['origin'] ?? '').toString();
+        return http.Response(
+            jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': 99}), 200);
+      }
+      if (model == 'stock.scrap' && method == 'read') {
+        return http.Response(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': [
+                {'id': 99, 'value': 5.0, 'scrap_qty': 2.0}
+              ]
+            }),
+            200);
+      }
+      return http.Response(
+          jsonEncode({'jsonrpc': '2.0', 'id': 1, 'result': true}), 200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    const p = InventoryProduct(
+      variantId: 10,
+      tmplId: 20,
+      name: 'Milk',
+      barcode: 'BC1',
+      defaultCode: 'M1',
+      listPrice: 4,
+      standardPrice: 2.5,
+      qtyAvailable: 5,
+      posCategId: null,
+    );
+    await client.createScrap(
+      product: p,
+      qty: 2,
+      reasonKey: 'expired',
+      dispositionKey: 'trashed',
+      loggedBy: 'clerk',
+      packageExpiry: '2026-01-01',
+      note: 'shelf check',
+    );
+    expect(sentOrigin, isNotNull);
+    expect(sentOrigin!, contains('reason=expired'));
+    expect(sentOrigin!, contains('by=clerk'));
+    expect(sentOrigin!, contains('code=BC1'));
+  });
+
+  test('integration: fetchScrapHistory decodes user + value + totals', () async {
+    final mock = MockClient((req) async {
+      return http.Response(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': [
+              {
+                'id': 5,
+                'product_id': [10, 'Milk'],
+                'scrap_qty': 2.0,
+                'state': 'done',
+                'date_done': '2026-05-01 10:00:00',
+                'origin':
+                    'WASTE|reason=expired|disp=trashed|by=clerk|code=BC1|note=shelf',
+                'value': 5.0,
+                'create_uid': [3, 'Clerk User'],
+                'create_date': '2026-05-01 10:01:00',
+              },
+              {
+                'id': 6,
+                'product_id': [11, 'Bread'],
+                'scrap_qty': 1.0,
+                'state': 'done',
+                'date_done': '2026-05-02 10:00:00',
+                'origin':
+                    'WASTE|reason=damaged|disp=donated|by=mgr|code=BR1',
+                'value': 3.0,
+                'create_uid': [4, 'Mgr User'],
+                'create_date': '2026-05-02 10:01:00',
+              },
+            ]
+          }),
+          200);
+    });
+    final client = OdooClient(baseUrl: 'https://x', httpClient: mock);
+    final rows = await client.fetchScrapHistory(limit: 100);
+    expect(rows.length, 2);
+    expect(rows.first.reasonKey, 'expired');
+    expect(rows.first.loggedBy, 'clerk');
+    expect(rows.first.createUidName, 'Clerk User');
+    expect(rows.first.loggedByDisplay, 'Clerk User');
+    expect(rows.first.unitValue, closeTo(2.5, 0.001));
+    final totals = ScrapTotals.of(
+        rows.where((r) => r.reasonKey == 'expired'));
+    expect(totals.count, 1);
+    expect(totals.qty, 2.0);
+    expect(totals.value, closeTo(5.0, 0.001));
+  });
 }

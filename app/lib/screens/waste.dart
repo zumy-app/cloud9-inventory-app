@@ -50,6 +50,11 @@ class _WasteScreenState extends State<WasteScreen> {
   String? _lastResult; // success banner after a scrap posts
   List<ScrapHistoryLine> _serverHistory = [];
   bool _serverLoading = false;
+  bool _serverLoadingMore = false;
+  bool _serverExhausted = false;
+  String? _serverError;
+  String _serverReason = 'all'; // all | expired | damaged | spoiled | recall | manual
+  static const _serverPage = 200;
 
   @override
   void initState() {
@@ -74,16 +79,68 @@ class _WasteScreenState extends State<WasteScreen> {
     super.dispose();
   }
 
-  Future<void> _loadServerHistory() async {
-    setState(() => _serverLoading = true);
-    try {
-      final rows = await widget.client.fetchScrapHistory(limit: 100);
-      if (mounted) setState(() => _serverHistory = rows);
-    } catch (_) {
-      // Server history is a cross-check; local log remains authoritative.
-    } finally {
-      if (mounted) setState(() => _serverLoading = false);
+  /// Shared DB log: every device/user's scraps, with who logged each one
+  /// (Odoo `create_uid`). Local drafts stay on-device until their scrap
+  /// posts; once posted the server row is the cross-device truth.
+  Future<void> _loadServerHistory({bool more = false}) async {
+    if (more) {
+      if (_serverLoadingMore || _serverExhausted) return;
+      setState(() => _serverLoadingMore = true);
+    } else {
+      setState(() {
+        _serverLoading = true;
+        _serverError = null;
+      });
     }
+    try {
+      final rows = await widget.client.fetchScrapHistory(
+        limit: _serverPage,
+        offset: more ? _serverHistory.length : 0,
+      );
+      if (!mounted) return;
+      setState(() {
+        if (more) {
+          _serverHistory.addAll(rows);
+          if (rows.length < _serverPage) _serverExhausted = true;
+        } else {
+          _serverHistory = rows;
+          _serverExhausted = rows.length < _serverPage;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      if (!more) {
+        setState(() => _serverError = e.toString());
+      }
+      // Server history augments the local log; local drafts remain usable.
+    } finally {
+      if (mounted) {
+        setState(() {
+          _serverLoading = false;
+          _serverLoadingMore = false;
+        });
+      }
+    }
+  }
+
+  /// Client-side filter over the loaded server page(s): text matches
+  /// product / origin / logger, reason matches the decoded `origin` key.
+  List<ScrapHistoryLine> get _filteredServer {
+    final q = _historySearch.text.trim().toLowerCase();
+    return _serverHistory.where((s) {
+      if (_serverReason != 'all') {
+        if (_serverReason == 'manual') {
+          if (s.reasonKey.isNotEmpty) return false;
+        } else if (s.reasonKey != _serverReason) {
+          return false;
+        }
+      }
+      if (q.isEmpty) return true;
+      return s.productName.toLowerCase().contains(q) ||
+          s.originRaw.toLowerCase().contains(q) ||
+          s.loggedByDisplay.toLowerCase().contains(q) ||
+          s.note.toLowerCase().contains(q);
+    }).toList();
   }
 
   void _refresh() {
@@ -426,7 +483,13 @@ class _WasteScreenState extends State<WasteScreen> {
         product: p,
         qty: q,
         lotId: _lotId,
-        origin: 'WASTE:${wasteReasonLabel(_reason!)}/${wasteDispositionLabel(_disposition!)}',
+        reasonKey: wasteReasonKey(_reason!),
+        dispositionKey: wasteDispositionKey(_disposition!),
+        loggedBy: widget.user,
+        packageExpiry: line.packageExpiry,
+        note: line.note,
+        supplierInvoice: line.supplierInvoice,
+        retailEach: effPrice,
       );
       WasteStore.instance.markPosted(id,
           scrapId: res.scrapId, unitValue: res.unitValue);
@@ -890,31 +953,26 @@ class _WasteScreenState extends State<WasteScreen> {
                       onPressed: _shareCsv, child: Text(t('waste_export'))),
                 ],
               ),
-              Card(
-                color: const Color(0xFFF3F4F6),
-                child: ListTile(
-                  title: Text(t('waste_server_title')),
-                  subtitle: Text(_serverLoading
-                      ? t('waste_server_loading')
-                      : Lang.instance.f('waste_server_body', {
-                          'n': '${_serverHistory.length}'
-                        })),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.refresh),
-                    onPressed: _loadServerHistory,
-                  ),
+              _ServerHistoryBrowser(
+                loading: _serverLoading,
+                loadingMore: _serverLoadingMore,
+                exhausted: _serverExhausted,
+                error: _serverError,
+                rows: _filteredServer,
+                totalLoaded: _serverHistory.length,
+                reason: _serverReason,
+                onReason: (v) => setState(() => _serverReason = v),
+                onRefresh: () => _loadServerHistory(),
+                onMore: () => _loadServerHistory(more: true),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  t('waste_local_title'),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
-              for (final s in _serverHistory.take(5))
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.cloud_done_outlined),
-                    title:
-                        Text('${s.productName} × ${s.qty.toStringAsFixed(0)}'),
-                    subtitle: Text(
-                        'scrap ${s.id} • ${s.state} • ${s.dateDone}\n${s.origin}'),
-                  ),
-                ),
             ],
           ),
         ),
@@ -980,6 +1038,209 @@ class _WasteScreenState extends State<WasteScreen> {
                 ),
         ),
       ],
+    );
+  }
+}
+
+/// Shared server log browser: all devices/users, with per-user attribution,
+/// reason filter, text search (shared with the local filter field), and
+/// totals over the filtered set.
+class _ServerHistoryBrowser extends StatelessWidget {
+  final bool loading;
+  final bool loadingMore;
+  final bool exhausted;
+  final String? error;
+  final List<ScrapHistoryLine> rows;
+  final int totalLoaded;
+  final String reason;
+  final ValueChanged<String> onReason;
+  final VoidCallback onRefresh;
+  final VoidCallback onMore;
+  const _ServerHistoryBrowser({
+    required this.loading,
+    required this.loadingMore,
+    required this.exhausted,
+    required this.error,
+    required this.rows,
+    required this.totalLoaded,
+    required this.reason,
+    required this.onReason,
+    required this.onRefresh,
+    required this.onMore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final totals = ScrapTotals.of(rows);
+    return Card(
+      color: const Color(0xFFF3F4F6),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text(t('waste_server_title'),
+                    style:
+                        const TextStyle(fontWeight: FontWeight.bold))),
+                if (loading)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 20),
+                    onPressed: onRefresh,
+                    tooltip: t('waste_server_title'),
+                  ),
+              ],
+            ),
+            Text(
+              loading
+                  ? t('waste_server_loading')
+                  : Lang.instance.f('waste_server_body', {
+                      'n': '$totalLoaded',
+                    }),
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 4),
+              Text(error!,
+                  style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                Lang.instance.f('waste_server_totals', {
+                  'n': '${totals.count}',
+                  'qty': totals.qty.toStringAsFixed(0),
+                  'value': totals.value.toStringAsFixed(2),
+                }),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                for (final r in [
+                  'all',
+                  'expired',
+                  'damaged',
+                  'spoiled',
+                  'recall',
+                  'manual'
+                ])
+                  ChoiceChip(
+                    label: Text(t('waste_srv_$r'),
+                        style: const TextStyle(fontSize: 12)),
+                    selected: reason == r,
+                    onSelected: (_) => onReason(r),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            if (rows.isEmpty && !loading)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(t('waste_srv_empty'),
+                    style: const TextStyle(color: Colors.grey)),
+              )
+            else
+              for (final s in rows.take(50))
+                Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.cloud_done_outlined, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '${s.productName} × ${s.qty.toStringAsFixed(0)} • \$${s.totalValue.toStringAsFixed(2)}',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          if (s.reasonLabel.isNotEmpty) s.reasonLabel,
+                          if (s.dispositionLabel.isNotEmpty)
+                            s.dispositionLabel,
+                          'scrap ${s.id} • ${s.state}',
+                        ].join(' • '),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.black87),
+                      ),
+                      Text(
+                        Lang.instance.f('waste_srv_byline', {
+                          'user': s.loggedByDisplay.isEmpty
+                              ? '—'
+                              : s.loggedByDisplay,
+                          'date': s.dateDone.isNotEmpty
+                              ? s.dateDone
+                              : s.createDate,
+                        }),
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      if (s.note.isNotEmpty ||
+                          s.packageExpiry.isNotEmpty ||
+                          s.supplierInvoice.isNotEmpty)
+                        Text(
+                          [
+                            if (s.packageExpiry.isNotEmpty)
+                              '${t('waste_expiry')}: ${s.packageExpiry}',
+                            if (s.supplierInvoice.isNotEmpty)
+                              'INV ${s.supplierInvoice}',
+                            if (s.note.isNotEmpty) s.note,
+                          ].join(' • '),
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.black54),
+                        ),
+                    ],
+                  ),
+                ),
+            if (rows.length > 50)
+              Text(
+                Lang.instance.f('waste_srv_showing', {
+                  'n': '50',
+                  'total': '${rows.length}',
+                }),
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            if (!exhausted && !loading) ...[
+              const SizedBox(height: 4),
+              OutlinedButton(
+                onPressed: loadingMore ? null : onMore,
+                child: Text(loadingMore
+                    ? t('waste_server_loading')
+                    : t('waste_srv_more')),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
